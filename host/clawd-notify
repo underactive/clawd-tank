@@ -20,9 +20,6 @@ CLAWD_DIR = Path.home() / ".clawd"
 PID_PATH = CLAWD_DIR / "daemon.pid"
 SOCKET_PATH = CLAWD_DIR / "sock"
 
-# Path to the daemon module (relative to this script)
-DAEMON_MODULE = Path(__file__).parent / "clawd_daemon" / "daemon.py"
-
 
 def is_daemon_running() -> bool:
     """Check if the daemon is alive via PID file."""
@@ -70,15 +67,16 @@ def send_to_daemon(payload: dict) -> None:
     if msg is None:
         return  # Irrelevant hook event
 
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(3.0)
         sock.connect(str(SOCKET_PATH))
         sock.sendall(json.dumps(msg).encode("utf-8"))
-        sock.close()
     except (ConnectionRefusedError, FileNotFoundError, socket.timeout) as e:
         print(f"Failed to send to daemon: {e}", file=sys.stderr)
         sys.exit(1)
+    finally:
+        sock.close()
 
 
 def main():

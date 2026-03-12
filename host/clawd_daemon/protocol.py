@@ -2,6 +2,7 @@
 
 import json
 import os
+from pathlib import Path
 from typing import Optional
 
 
@@ -17,7 +18,9 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
         if hook.get("notification_type") != "idle_prompt":
             return None
         cwd = hook.get("cwd", "")
-        project = os.path.basename(cwd) if cwd else "unknown"
+        project = Path(cwd).name if cwd else "unknown"
+        if not project:
+            project = "unknown"
         message = hook.get("message", "Waiting for input")
         return {
             "event": "add",
@@ -42,7 +45,7 @@ def daemon_message_to_ble_payload(msg: dict) -> str:
     if event == "add":
         return json.dumps({
             "action": "add",
-            "id": msg["session_id"],
+            "id": msg.get("session_id", ""),
             "project": msg.get("project", ""),
             "message": msg.get("message", ""),
         })
@@ -50,7 +53,7 @@ def daemon_message_to_ble_payload(msg: dict) -> str:
     if event == "dismiss":
         return json.dumps({
             "action": "dismiss",
-            "id": msg["session_id"],
+            "id": msg.get("session_id", ""),
         })
 
     if event == "clear":

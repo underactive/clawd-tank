@@ -16,8 +16,8 @@ class ClawdBleClient:
 
     def __init__(self):
         self._client: BleakClient | None = None
-        self._connected = asyncio.Event()
         self._lock = asyncio.Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -25,6 +25,7 @@ class ClawdBleClient:
 
     async def connect(self) -> None:
         """Scan for and connect to the Clawd device. Retries until found."""
+        self._loop = asyncio.get_running_loop()
         while True:
             logger.info("Scanning for Clawd device...")
             device = await BleakScanner.find_device_by_name(
@@ -42,7 +43,6 @@ class ClawdBleClient:
                 )
                 await client.connect()
                 self._client = client
-                self._connected.set()
                 logger.info("Connected to Clawd (MTU: %d)", client.mtu_size)
                 return
             except Exception as e:
@@ -50,8 +50,14 @@ class ClawdBleClient:
                 await asyncio.sleep(SCAN_INTERVAL_SECS)
 
     def _on_disconnect(self, client: BleakClient) -> None:
+        """Handle disconnect — may be called from a non-event-loop thread."""
         logger.warning("Disconnected from Clawd")
-        self._connected.clear()
+        if self._loop is not None and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._clear_client)
+        else:
+            self._clear_client()
+
+    def _clear_client(self) -> None:
         self._client = None
 
     async def ensure_connected(self) -> None:
@@ -84,4 +90,3 @@ class ClawdBleClient:
         if self._client and self._client.is_connected:
             await self._client.disconnect()
         self._client = None
-        self._connected.clear()

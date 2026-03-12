@@ -23,6 +23,7 @@ class ClawdDaemon:
         self._active_notifications: dict[str, dict] = {}
         self._pending_queue: asyncio.Queue[dict] = asyncio.Queue()
         self._running = True
+        self._shutdown_event = asyncio.Event()
 
     async def _handle_message(self, msg: dict) -> None:
         """Handle a message from clawd-notify via the socket."""
@@ -39,7 +40,7 @@ class ClawdDaemon:
     async def _replay_active(self) -> None:
         """Replay all active notifications after reconnect."""
         logger.info("Replaying %d active notifications", len(self._active_notifications))
-        for msg in self._active_notifications.values():
+        for msg in list(self._active_notifications.values()):
             payload = daemon_message_to_ble_payload(msg)
             await self._ble.write_notification(payload)
             await asyncio.sleep(0.05)  # Small delay between writes
@@ -62,7 +63,6 @@ class ClawdDaemon:
         await self._ble.write_notification(clear_payload)
         await self._ble.disconnect()
         await self._socket.stop()
-        self._remove_pid()
 
     async def _ble_sender(self) -> None:
         """Process pending messages and send them over BLE."""
@@ -88,9 +88,8 @@ class ClawdDaemon:
         )
 
         self._write_pid()
-        self._shutdown_event = asyncio.Event()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda: asyncio.create_task(self._shutdown()))
 
@@ -111,8 +110,6 @@ class ClawdDaemon:
                 await task
             except asyncio.CancelledError:
                 pass
-
-        self._remove_pid()
 
 
 def main():
