@@ -16,6 +16,7 @@
 #include "assets/sprite_happy.h"
 #include "assets/sprite_sleeping.h"
 #include "assets/sprite_disconnected.h"
+#include "rle_sprite.h"
 
 /* ---------- Constants ---------- */
 
@@ -38,18 +39,20 @@
 /* ---------- Animation metadata ---------- */
 
 typedef struct {
-    const uint16_t *const *frames;
+    const uint16_t *rle_data;
+    const uint32_t *frame_offsets;
     int frame_count;
     int frame_ms;
     bool looping;
-    int width;    /* sprite width in pixels (0 = use SPRITE_W) */
-    int height;   /* sprite height in pixels (0 = use SPRITE_H) */
-    int y_offset; /* LVGL bottom-align y offset (accounts for canvas padding below feet) */
+    int width;
+    int height;
+    int y_offset;
 } anim_def_t;
 
 static const anim_def_t anim_defs[] = {
     [CLAWD_ANIM_IDLE] = {
-        .frames = idle_frames,
+        .rle_data = idle_rle_data,
+        .frame_offsets = idle_frame_offsets,
         .frame_count = IDLE_FRAME_COUNT,
         .frame_ms = IDLE_FRAME_MS,
         .looping = true,
@@ -58,7 +61,8 @@ static const anim_def_t anim_defs[] = {
         .y_offset = 8,
     },
     [CLAWD_ANIM_ALERT] = {
-        .frames = alert_frames,
+        .rle_data = alert_rle_data,
+        .frame_offsets = alert_frame_offsets,
         .frame_count = ALERT_FRAME_COUNT,
         .frame_ms = ALERT_FRAME_MS,
         .looping = false,
@@ -67,7 +71,8 @@ static const anim_def_t anim_defs[] = {
         .y_offset = 8,
     },
     [CLAWD_ANIM_HAPPY] = {
-        .frames = happy_frames,
+        .rle_data = happy_rle_data,
+        .frame_offsets = happy_frame_offsets,
         .frame_count = HAPPY_FRAME_COUNT,
         .frame_ms = HAPPY_FRAME_MS,
         .looping = false,
@@ -76,7 +81,8 @@ static const anim_def_t anim_defs[] = {
         .y_offset = 28,
     },
     [CLAWD_ANIM_SLEEPING] = {
-        .frames = sleeping_frames,
+        .rle_data = sleeping_rle_data,
+        .frame_offsets = sleeping_frame_offsets,
         .frame_count = SLEEPING_FRAME_COUNT,
         .frame_ms = SLEEPING_FRAME_MS,
         .looping = true,
@@ -85,7 +91,8 @@ static const anim_def_t anim_defs[] = {
         .y_offset = 8,
     },
     [CLAWD_ANIM_DISCONNECTED] = {
-        .frames = disconnected_frames,
+        .rle_data = disconnected_rle_data,
+        .frame_offsets = disconnected_frame_offsets,
         .frame_count = DISCONNECTED_FRAME_COUNT,
         .frame_ms = DISCONN_FRAME_MS,
         .looping = true,
@@ -126,8 +133,9 @@ struct scene_t {
 
     /* Clawd sprite */
     lv_obj_t *sprite_img;
-    lv_image_dsc_t frame_dscs[96]; /* max frames across all anims */
-    uint8_t *frame_bufs[96];       /* converted ARGB8888 buffers (PSRAM) */
+    lv_image_dsc_t frame_dsc;     /* single frame descriptor */
+    uint8_t *frame_buf;           /* single ARGB8888 buffer */
+    int frame_buf_size;           /* current buffer size in bytes */
     clawd_anim_id_t cur_anim;
     int frame_idx;
     uint32_t last_frame_tick;
@@ -144,66 +152,40 @@ struct scene_t {
 
 /* ---------- Helpers ---------- */
 
-static void free_frame_bufs(scene_t *s)
+static void ensure_frame_buf(scene_t *s, int w, int h)
 {
-    for (int i = 0; i < 96; i++) {
-        if (s->frame_bufs[i]) {
-            free(s->frame_bufs[i]);
-            s->frame_bufs[i] = NULL;
-        }
-    }
+    int needed = w * h * 4; /* ARGB8888 */
+    if (s->frame_buf && s->frame_buf_size >= needed) return;
+    free(s->frame_buf);
+    s->frame_buf = malloc(needed);
+    s->frame_buf_size = s->frame_buf ? needed : 0;
 }
 
-static void build_frame_dscs(scene_t *s, const anim_def_t *def)
-{
-    free_frame_bufs(s);
-
-    int w = def->width  ? def->width  : SPRITE_W;
-    int h = def->height ? def->height : SPRITE_H;
-
-    for (int i = 0; i < def->frame_count && i < 96; i++) {
-        /* Convert RGB565 → ARGB8888, replacing chroma key with alpha=0 */
-        int pixel_count = w * h;
-        size_t buf_size = pixel_count * 4;
-        uint8_t *buf = malloc(buf_size);
-        if (!buf) continue;
-
-        const uint16_t *src = def->frames[i];
-        for (int p = 0; p < pixel_count; p++) {
-            uint16_t pixel = src[p];
-            uint8_t r5 = (pixel >> 11) & 0x1F;
-            uint8_t g6 = (pixel >> 5) & 0x3F;
-            uint8_t b5 = pixel & 0x1F;
-            /* Expand 5/6-bit to 8-bit */
-            uint8_t r = (r5 << 3) | (r5 >> 2);
-            uint8_t g = (g6 << 2) | (g6 >> 4);
-            uint8_t b = (b5 << 3) | (b5 >> 2);
-            uint8_t a = (pixel == TRANSPARENT_KEY) ? 0x00 : 0xFF;
-            /* LVGL ARGB8888 little-endian: [B, G, R, A] */
-            buf[p * 4 + 0] = b;
-            buf[p * 4 + 1] = g;
-            buf[p * 4 + 2] = r;
-            buf[p * 4 + 3] = a;
-        }
-        s->frame_bufs[i] = buf;
-
-        lv_image_dsc_t *d = &s->frame_dscs[i];
-        d->header.magic = LV_IMAGE_HEADER_MAGIC;
-        d->header.w = w;
-        d->header.h = h;
-        d->header.cf = LV_COLOR_FORMAT_ARGB8888;
-        d->header.stride = w * 4;
-        d->data = buf;
-        d->data_size = buf_size;
-    }
-}
-
-static void apply_sprite_frame(scene_t *s)
+static void decode_and_apply_frame(scene_t *s)
 {
     const anim_def_t *def = &anim_defs[s->cur_anim];
     int idx = s->frame_idx;
     if (idx >= def->frame_count) idx = def->frame_count - 1;
-    lv_image_set_src(s->sprite_img, &s->frame_dscs[idx]);
+
+    int w = def->width;
+    int h = def->height;
+    ensure_frame_buf(s, w, h);
+    if (!s->frame_buf) return;
+
+    /* Decompress this frame's RLE directly to ARGB8888 */
+    const uint16_t *frame_rle = &def->rle_data[def->frame_offsets[idx]];
+    rle_decode_argb8888(frame_rle, s->frame_buf, w * h, TRANSPARENT_KEY);
+
+    /* Update the LVGL image descriptor */
+    s->frame_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+    s->frame_dsc.header.w = w;
+    s->frame_dsc.header.h = h;
+    s->frame_dsc.header.cf = LV_COLOR_FORMAT_ARGB8888;
+    s->frame_dsc.header.stride = w * 4;
+    s->frame_dsc.data = s->frame_buf;
+    s->frame_dsc.data_size = w * h * 4;
+
+    lv_image_set_src(s->sprite_img, &s->frame_dsc);
 }
 
 static uint32_t random_range(uint32_t min_val, uint32_t max_val)
@@ -285,8 +267,7 @@ scene_t *scene_create(lv_obj_t *parent)
     s->cur_anim = CLAWD_ANIM_IDLE;
     s->frame_idx = 0;
     s->last_frame_tick = lv_tick_get();
-    build_frame_dscs(s, &anim_defs[CLAWD_ANIM_IDLE]);
-    apply_sprite_frame(s);
+    decode_and_apply_frame(s);
 
     /* Time label — top-right */
     s->time_label = lv_label_create(s->container);
@@ -390,8 +371,7 @@ void scene_set_clawd_anim(scene_t *scene, clawd_anim_id_t anim)
     scene->last_frame_tick = lv_tick_get();
 
     const anim_def_t *def = &anim_defs[anim];
-    build_frame_dscs(scene, def);
-    apply_sprite_frame(scene);
+    decode_and_apply_frame(scene);
 
     /* Re-align sprite for this animation's ground offset */
     lv_obj_align(scene->sprite_img, LV_ALIGN_BOTTOM_MID, 0, def->y_offset);
@@ -460,7 +440,7 @@ void scene_tick(scene_t *scene)
                 return;
             }
         }
-        apply_sprite_frame(scene);
+        decode_and_apply_frame(scene);
     }
 
     /* Star twinkle */
