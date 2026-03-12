@@ -16,11 +16,12 @@ SCAN_INTERVAL_SECS = 5
 class ClawdBleClient:
     """Manages BLE connection to the Clawd Tank ESP32 device."""
 
-    def __init__(self, on_disconnect_cb=None):
+    def __init__(self, on_disconnect_cb=None, on_connect_cb=None):
         self._client: BleakClient | None = None
         self._lock = asyncio.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._on_disconnect_cb = on_disconnect_cb
+        self._on_connect_cb = on_connect_cb
 
     @property
     def is_connected(self) -> bool:
@@ -47,6 +48,8 @@ class ClawdBleClient:
                 await client.connect()
                 self._client = client
                 logger.info("Connected to Clawd Tank (MTU: %d)", client.mtu_size)
+                if self._on_connect_cb:
+                    self._on_connect_cb()
                 return
             except Exception as e:
                 logger.warning("Connection failed: %s, retrying...", e)

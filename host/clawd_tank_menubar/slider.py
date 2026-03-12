@@ -28,19 +28,6 @@ class SliderMenuItem(AppKit.NSObject):
         if not enabled:
             self._value_label.setStringValue_("--")
 
-    @objc.python_method
-    def set_value(self, value: int):
-        """Set slider value programmatically (e.g., on config read)."""
-        self._slider.setIntegerValue_(value)
-        self._value_label.setStringValue_(f"{int(value / 255 * 100)}%")
-
-    @objc.python_method
-    def set_enabled(self, enabled: bool):
-        """Enable or disable the slider."""
-        self._slider.setEnabled_(enabled)
-        if not enabled:
-            self._value_label.setStringValue_("--")
-
     def sliderChanged_(self, sender):
         value = int(sender.integerValue())
         self._value_label.setStringValue_(f"{int(value / 255 * 100)}%")
@@ -99,8 +86,7 @@ def create_slider_menu_item(label: str, min_val: int = 0, max_val: int = 255,
     ))
     view.addSubview_(instance._slider)
 
-    # Menu item
-    instance.item = AppKit.NSMenuItem.alloc().init()
-    instance.item.setView_(view)
+    # Store view for external use (caller sets it on a rumps MenuItem)
+    instance.view = view
 
     return instance

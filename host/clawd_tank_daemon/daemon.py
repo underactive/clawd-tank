@@ -25,22 +25,66 @@ class DaemonObserver(Protocol):
     def on_notification_change(self, count: int) -> None: ...
 
 
-def _acquire_lock() -> int:
-    """Acquire an exclusive file lock. Returns the fd, or exits if another daemon is running."""
+def _stop_existing_daemon() -> bool:
+    """Send SIGTERM to an existing daemon and wait for it to exit. Returns True if stopped."""
+    if not PID_PATH.exists():
+        return False
+    try:
+        pid = int(PID_PATH.read_text().strip())
+    except (ValueError, OSError):
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True  # already dead
+    except PermissionError:
+        return False
+    # Wait up to 3 seconds for it to release the lock
+    import time
+    for _ in range(30):
+        try:
+            os.kill(pid, 0)  # check if still alive
+        except ProcessLookupError:
+            return True
+        time.sleep(0.1)
+    logger.warning("Existing daemon (PID %d) did not exit in time", pid)
+    return False
+
+
+def _acquire_lock(takeover: bool = False) -> int:
+    """Acquire an exclusive file lock.
+
+    If takeover is True (menu bar mode), stop the existing daemon first.
+    If takeover is False (headless mode), exit if another daemon is running.
+    """
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(LOCK_PATH), os.O_CREAT | os.O_RDWR, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        os.close(fd)
-        print("Another clawd-tank daemon is already running", file=sys.stderr)
-        sys.exit(0)
+        if takeover:
+            logger.info("Stopping existing daemon to take over...")
+            _stop_existing_daemon()
+            # Retry the lock
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                os.close(fd)
+                print("Could not acquire lock after stopping existing daemon", file=sys.stderr)
+                sys.exit(1)
+        else:
+            os.close(fd)
+            print("Another clawd-tank daemon is already running", file=sys.stderr)
+            sys.exit(0)
     return fd
 
 
 class ClawdDaemon:
     def __init__(self, observer: Optional["DaemonObserver"] = None, headless: bool = True):
-        self._ble = ClawdBleClient(on_disconnect_cb=self._on_ble_disconnect)
+        self._ble = ClawdBleClient(
+            on_disconnect_cb=self._on_ble_disconnect,
+            on_connect_cb=self._on_ble_connect,
+        )
         self._socket = SocketServer(on_message=self._handle_message)
         self._active_notifications: dict[str, dict] = {}
         self._pending_queue: asyncio.Queue[dict] = asyncio.Queue()
@@ -100,6 +144,11 @@ class ClawdDaemon:
             os.close(self._lock_fd)
             self._lock_fd = None
 
+    def _on_ble_connect(self) -> None:
+        """Called by BLE client on successful connection."""
+        if self._observer:
+            self._observer.on_connection_change(True)
+
     def _on_ble_disconnect(self) -> None:
         """Called by BLE client on disconnect."""
         if self._observer:
@@ -139,7 +188,7 @@ class ClawdDaemon:
             format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         )
 
-        self._lock_fd = _acquire_lock()
+        self._lock_fd = _acquire_lock(takeover=not self._headless)
         self._write_pid()
 
         if self._headless:

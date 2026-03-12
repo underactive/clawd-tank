@@ -42,11 +42,13 @@ class ClawdTankApp(rumps.App, DaemonObserver):
         self._subtitle_item = rumps.MenuItem("Scanning for device...", callback=None)
         self._subtitle_item.set_callback(None)
 
-        # Brightness slider
+        # Brightness slider — rumps MenuItem with custom NSView
         self._brightness_slider = create_slider_menu_item(
             "Brightness", min_val=0, max_val=255, initial=102,
             on_change=self._on_brightness_change,
         )
+        self._brightness_item = rumps.MenuItem("Brightness")
+        self._brightness_item._menuitem.setView_(self._brightness_slider.view)
 
         # Sleep timeout submenu
         self._sleep_menu = rumps.MenuItem("Sleep Timeout")
@@ -76,7 +78,7 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             self._status_item,
             self._subtitle_item,
             None,
-            self._brightness_slider.item,
+            self._brightness_item,
             None,
             self._sleep_menu,
             None,
@@ -87,6 +89,10 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             self._quit_item,
         ]
 
+        # Set initial icon and hide text title so only the icon shows in the menu bar
+        self.icon = self._icon_path("crab-disconnected")
+        self.template = True
+        self.title = ""
         self._update_menu_state()
 
     # --- Lifecycle ---
@@ -168,6 +174,7 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             self.icon = self._icon_path("crab-disconnected")
             self._brightness_slider.set_enabled(False)
             self._reconnect_item.set_callback(None)
+        self.title = ""
 
     def _icon_path(self, name: str) -> Optional[str]:
         """Return path to icon file, or None if not found."""
