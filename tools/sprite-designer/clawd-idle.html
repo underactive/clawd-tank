@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Clawd Idle Animation</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; color: #eee; font-family: monospace; padding: 20px; }
+h1 { font-size: 16px; margin-bottom: 16px; color: #e3876e; }
+.frames-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
+.frame-box { text-align: center; }
+.frame-box canvas { border: 1px solid #333; image-rendering: pixelated; }
+.frame-label { font-size: 10px; color: #888; margin-top: 4px; }
+#controls { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+button {
+  padding: 6px 14px; background: #2a2a4e; color: #eee; border: 1px solid #444;
+  border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 12px;
+}
+button:hover { background: #3a3a5e; }
+button.primary { background: #e3876e; border-color: #e3876e; color: #fff; }
+button.primary:hover { background: #d07060; }
+#preview-section { margin-top: 16px; }
+#preview-section h2 { font-size: 13px; color: #aaa; margin-bottom: 8px; }
+#preview { border: 1px solid #333; image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<h1>Clawd Idle Animation (8 frames, 64x64)</h1>
+
+<div id="controls">
+  <button onclick="togglePlay()" id="play-btn">Play</button>
+  <span id="frame-info" style="font-size:11px; color:#888;">Frame 1/8</span>
+  <button class="primary" onclick="exportAllPNG()">Export PNGs</button>
+</div>
+
+<div id="preview-section">
+  <h2>Preview (4x)</h2>
+  <canvas id="preview" width="256" height="256"></canvas>
+</div>
+
+<h2 style="font-size:13px; color:#aaa; margin: 20px 0 8px;">All Frames (4x)</h2>
+<div class="frames-row" id="frames-row"></div>
+
+<script>
+const W = 64, H = 64;
+const BG = '#1a1a2e';
+const BODY = '#e3876e';
+const EYE = '#000000';
+
+// ---- Clawd geometry from Piskel reference ----
+// Body: main rect x=12..51, y=17..42 (40x26)
+// Claw band: x=6..57, y=30..36 (52x7) — extends 6px on each side
+// Legs: 4 legs each 4px wide, 7px tall, y=43..49
+//   Leg positions: x=15..18, x=22..25, x=39..42, x=45..48
+// Eyes: left x=19..20 y=24..29 (2x6), right x=43..44 y=24..29 (2x6)
+
+function drawClawd(ctx, opts = {}) {
+  const ox = opts.offsetX || 0;
+  const oy = opts.offsetY || 0;
+  const eyeMode = opts.eyeMode || 'open'; // open, half-closed, closed, half-open
+
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = BODY;
+
+  // Main body top (y=17..23)
+  ctx.fillRect(12 + ox, 17 + oy, 40, 7);
+
+  // Body with eye region (y=24..29) — fill full, eyes drawn on top
+  ctx.fillRect(12 + ox, 24 + oy, 40, 6);
+
+  // Claw/wide band (y=30..36)
+  ctx.fillRect(6 + ox, 30 + oy, 52, 7);
+
+  // Body lower (y=37..42)
+  ctx.fillRect(12 + ox, 37 + oy, 40, 6);
+
+  // 4 Legs (y=43..49, each 4px wide, 7px tall)
+  ctx.fillRect(15 + ox, 43 + oy, 4, 7);
+  ctx.fillRect(22 + ox, 43 + oy, 4, 7);
+  ctx.fillRect(39 + ox, 43 + oy, 4, 7);
+  ctx.fillRect(45 + ox, 43 + oy, 4, 7);
+
+  // Eyes
+  ctx.fillStyle = EYE;
+  switch (eyeMode) {
+    case 'open':
+      // Full eyes: 2x6 each
+      ctx.fillRect(19 + ox, 24 + oy, 2, 6);
+      ctx.fillRect(43 + ox, 24 + oy, 2, 6);
+      break;
+    case 'half-closed':
+      // Lower half visible: 2x3, starting y=27
+      ctx.fillRect(19 + ox, 27 + oy, 2, 3);
+      ctx.fillRect(43 + ox, 27 + oy, 2, 3);
+      break;
+    case 'closed':
+      // Horizontal line: 2x1 at y=28
+      ctx.fillRect(19 + ox, 28 + oy, 2, 1);
+      ctx.fillRect(43 + ox, 28 + oy, 2, 1);
+      break;
+    case 'half-open':
+      // Re-opening: 2x3 from y=26
+      ctx.fillRect(19 + ox, 26 + oy, 2, 3);
+      ctx.fillRect(43 + ox, 26 + oy, 2, 3);
+      break;
+  }
+}
+
+// ---- 8 Idle Animation Frames ----
+const frameConfigs = [
+  { eyeMode: 'open',        offsetX: 0, offsetY: 0, label: '1: Neutral' },
+  { eyeMode: 'open',        offsetX: 0, offsetY: 0, label: '2: Hold' },
+  { eyeMode: 'half-closed', offsetX: 0, offsetY: 0, label: '3: Blink start' },
+  { eyeMode: 'closed',      offsetX: 0, offsetY: 0, label: '4: Eyes closed' },
+  { eyeMode: 'half-open',   offsetX: 0, offsetY: 0, label: '5: Blink end' },
+  { eyeMode: 'open',        offsetX: 0, offsetY: 0, label: '6: Neutral' },
+  { eyeMode: 'open',        offsetX: 1, offsetY: 0, label: '7: Lean right' },
+  { eyeMode: 'open',        offsetX: 0, offsetY: 0, label: '8: Back neutral' },
+];
+
+// ---- Render all frames to offscreen canvases ----
+const frameCanvases = [];
+
+frameConfigs.forEach((cfg, i) => {
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const fCtx = c.getContext('2d');
+  drawClawd(fCtx, cfg);
+  frameCanvases.push(c);
+});
+
+// ---- Display frames in a row at 4x ----
+const framesRow = document.getElementById('frames-row');
+frameConfigs.forEach((cfg, i) => {
+  const box = document.createElement('div');
+  box.className = 'frame-box';
+
+  const display = document.createElement('canvas');
+  display.width = W * 4;
+  display.height = H * 4;
+  display.style.width = (W * 4) + 'px';
+  display.style.height = (H * 4) + 'px';
+  const dCtx = display.getContext('2d');
+  dCtx.imageSmoothingEnabled = false;
+  dCtx.drawImage(frameCanvases[i], 0, 0, W * 4, H * 4);
+
+  const label = document.createElement('div');
+  label.className = 'frame-label';
+  label.textContent = cfg.label;
+
+  box.appendChild(display);
+  box.appendChild(label);
+  framesRow.appendChild(box);
+});
+
+// ---- Preview playback ----
+const previewCanvas = document.getElementById('preview');
+const previewCtx = previewCanvas.getContext('2d');
+previewCtx.imageSmoothingEnabled = false;
+let currentFrame = 0;
+let playing = false;
+let playInterval = null;
+
+function renderPreview() {
+  previewCtx.drawImage(frameCanvases[currentFrame], 0, 0, 256, 256);
+  document.getElementById('frame-info').textContent = `Frame ${currentFrame + 1}/${frameCanvases.length}`;
+}
+
+function togglePlay() {
+  playing = !playing;
+  const btn = document.getElementById('play-btn');
+  if (playing) {
+    btn.textContent = 'Stop';
+    playInterval = setInterval(() => {
+      currentFrame = (currentFrame + 1) % frameCanvases.length;
+      renderPreview();
+    }, 1000 / 6);
+  } else {
+    btn.textContent = 'Play';
+    clearInterval(playInterval);
+    playInterval = null;
+  }
+}
+
+// ---- Export ----
+function exportAllPNG() {
+  frameCanvases.forEach((c, i) => {
+    setTimeout(() => {
+      c.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `idle_${String(i).padStart(2, '0')}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, 'image/png');
+    }, i * 200);
+  });
+}
+
+// Init
+renderPreview();
+</script>
+</body>
+</html>
