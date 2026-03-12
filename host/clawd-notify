@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""clawd-notify — Claude Code hook handler for Clawd notifications.
+
+Reads hook payload from stdin, forwards to the Clawd daemon.
+Starts the daemon if not running.
+"""
+
+import json
+import os
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+# Ensure clawd_daemon package is importable
+sys.path.insert(0, str(Path(__file__).parent))
+
+CLAWD_DIR = Path.home() / ".clawd"
+PID_PATH = CLAWD_DIR / "daemon.pid"
+SOCKET_PATH = CLAWD_DIR / "sock"
+
+# Path to the daemon module (relative to this script)
+DAEMON_MODULE = Path(__file__).parent / "clawd_daemon" / "daemon.py"
+
+
+def is_daemon_running() -> bool:
+    """Check if the daemon is alive via PID file."""
+    if not PID_PATH.exists():
+        return False
+    try:
+        pid = int(PID_PATH.read_text().strip())
+        os.kill(pid, 0)  # Check if process exists
+        return True
+    except (ValueError, ProcessLookupError, PermissionError, OSError):
+        # Stale PID file
+        PID_PATH.unlink(missing_ok=True)
+        return False
+
+
+def start_daemon() -> None:
+    """Start the daemon in the background."""
+    CLAWD_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Start daemon as a detached subprocess
+    log_file = open(CLAWD_DIR / "daemon.log", "a")
+    subprocess.Popen(
+        [sys.executable, "-m", "clawd_daemon.daemon"],
+        cwd=str(Path(__file__).parent),
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    log_file.close()
+
+    # Wait for socket to appear
+    for _ in range(50):  # 5 seconds max
+        if SOCKET_PATH.exists():
+            return
+        time.sleep(0.1)
+
+    print("Warning: daemon may not have started", file=sys.stderr)
+
+
+def send_to_daemon(payload: dict) -> None:
+    """Send a JSON message to the daemon via Unix socket."""
+    from clawd_daemon.protocol import hook_payload_to_daemon_message
+
+    msg = hook_payload_to_daemon_message(payload)
+    if msg is None:
+        return  # Irrelevant hook event
+
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(3.0)
+        sock.connect(str(SOCKET_PATH))
+        sock.sendall(json.dumps(msg).encode("utf-8"))
+        sock.close()
+    except (ConnectionRefusedError, FileNotFoundError, socket.timeout) as e:
+        print(f"Failed to send to daemon: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def main():
+    # Read hook payload from stdin
+    try:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            sys.exit(0)
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"Invalid JSON from hook: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Ensure daemon is running
+    if not is_daemon_running():
+        start_daemon()
+
+    # Forward to daemon
+    send_to_daemon(payload)
+
+
+if __name__ == "__main__":
+    main()
