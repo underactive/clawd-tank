@@ -45,10 +45,8 @@ simulator/
     cJSON.h
   shims/                      # Shadow headers for ESP-IDF includes
     esp_log.h
-    sys/
-      lock.h
     freertos/
-      FreeRTOS.h
+      FreeRTOS.h              # Also provides _lock_t stubs (see Shims section)
       queue.h
     ble_service.h             # Re-exports event types without BLE deps
   scenarios/
@@ -71,14 +69,17 @@ void          sim_display_shutdown(void);
 - SDL2 window at 320x172 rendered at **3x scale** (960x516 window)
 - LVGL flush callback copies RGB565 framebuffer to SDL texture
 - SDL event loop pumps keyboard input
-- Main loop runs `lv_timer_handler()` at ~30fps (33ms interval)
+- Main loop calls `ui_manager_tick()` at ~30fps (33ms interval), which internally calls `lv_timer_handler()` once per iteration
+- **Important:** `sim_display_tick()` must NOT call `lv_timer_handler()` — it only pumps SDL events. The single `lv_timer_handler()` call lives inside `ui_manager_tick()` to avoid double-firing LVGL timers (notification rotation, sleep timeout)
 
 ### Headless mode (`--headless`)
 
 - No SDL window, no display server required
 - LVGL renders to a plain memory buffer
 - Flush callback memcpys into a framebuffer array
-- LVGL tick driven by `gettimeofday()` instead of real-time — simulated time advances per frame
+- LVGL tick driven by simulated time via `lv_tick_set_cb(sim_get_tick)` — `sim_get_tick` returns a monotonically increasing counter advanced by `wait` commands
+- Each `wait <N>` advances the tick counter by N ms and iterates `lv_timer_handler()` enough times (at 33ms steps) to process that simulated duration — this ensures animations, the 8s notification rotation timer, and the sleep timeout all fire at correct simulated times
+- Framebuffer stride is `320 * 2` bytes (width * 2, no padding) for RGB565
 
 ## Event Injection (`sim_events.c`)
 
@@ -106,7 +107,7 @@ Event syntax (semicolon-separated):
 - `connect` — BLE connected event
 - `disconnect` — BLE disconnected event
 - `notify "project" "message"` — add notification
-- `dismiss <index>` — dismiss notification by index (0-based)
+- `dismiss <index>` — dismiss notification by index (0-based). `sim_events.c` maintains an ordered list of injected notification IDs (appended on each `notify`); `dismiss N` maps to `id_list[N]` to produce the correct `ble_evt_t.id`
 - `clear` — clear all notifications
 - `wait <ms>` — advance simulated time by N milliseconds
 
@@ -122,6 +123,25 @@ Event syntax (semicolon-separated):
 ```
 
 Events are converted to `ble_evt_t` structs and fed into `ui_manager_handle_event()` — same path as real firmware.
+
+## Initialization Sequence (`sim_main.c`)
+
+Order matters — `ui_manager_init()` calls `lv_screen_active()` which requires a registered display:
+
+```
+1. lv_init()
+2. sim_display_init(headless, scale)     → registers LVGL display
+3. if headless: lv_tick_set_cb(sim_get_tick)
+4. sim_events_init(events_str, scenario_path)
+5. ui_manager_init(display)
+6. sim_screenshot_init(screenshot_dir)
+7. main loop:
+     sim_display_tick()                  → pump SDL events (interactive) or no-op (headless)
+     sim_events_process(current_time)    → fire any due events via ui_manager_handle_event()
+     ui_manager_tick()                   → calls lv_timer_handler() internally
+     sim_screenshot_maybe_capture()      → check interval/event triggers
+     SDL_Delay(33) or advance sim time
+```
 
 ## Screenshot Capture (`sim_screenshot.c`)
 
@@ -153,25 +173,29 @@ Both flags can combine.
 #define ESP_LOGE(tag, fmt, ...) printf("[E][%s] " fmt "\n", tag, ##__VA_ARGS__)
 ```
 
-### `shims/sys/lock.h`
+### `shims/freertos/FreeRTOS.h` + `shims/freertos/queue.h`
+
+`FreeRTOS.h` also provides `_lock_t` stubs (the ESP-IDF newlib `_lock_t` type is not available on macOS, and shimming `sys/lock.h` is unreliable because macOS SDK provides its own). The `_lock_*` stubs are no-ops since the simulator is single-threaded.
+
 ```c
+// freertos/FreeRTOS.h
+typedef void *QueueHandle_t;
+typedef unsigned int TickType_t;
+#define pdMS_TO_TICKS(ms) (ms)
+
+// _lock_t stubs (ESP-IDF newlib compatibility)
 typedef int _lock_t;
 #define _lock_init(lock)
 #define _lock_acquire(lock)
 #define _lock_release(lock)
 ```
-No-op stubs — simulator is single-threaded.
-
-### `shims/freertos/FreeRTOS.h` + `shims/freertos/queue.h`
-```c
-typedef void *QueueHandle_t;
-typedef unsigned int TickType_t;
-#define pdMS_TO_TICKS(ms) (ms)
-```
 
 ### `shims/ble_service.h`
-Re-exports the event types without pulling in FreeRTOS:
+Re-exports the event types without pulling in FreeRTOS. **Must include `notification.h`** and use its constants (`NOTIF_MAX_ID_LEN`, `NOTIF_MAX_PROJ_LEN`, `NOTIF_MAX_MSG_LEN`) for struct field sizes, matching the real `ble_service.h` — hardcoded sizes would silently diverge if constants change.
+
 ```c
+#include "notification.h"
+
 typedef enum {
     BLE_EVT_NOTIF_ADD,
     BLE_EVT_NOTIF_DISMISS,
@@ -182,9 +206,9 @@ typedef enum {
 
 typedef struct {
     ble_evt_type_t type;
-    char id[48];
-    char project[32];
-    char message[64];
+    char id[NOTIF_MAX_ID_LEN];
+    char project[NOTIF_MAX_PROJ_LEN];
+    char message[NOTIF_MAX_MSG_LEN];
 } ble_evt_t;
 ```
 
@@ -195,6 +219,8 @@ Key settings matching firmware behavior:
 - `LV_USE_SDL 1` (interactive mode display driver)
 - `LV_FONT_MONTSERRAT_8 1`, `LV_FONT_MONTSERRAT_10 1`, `LV_FONT_MONTSERRAT_18 1`
 - `LV_USE_FLOAT 1`
+- `LV_SDL_DIRECT_EXIT 0` (prevent SDL from calling `exit(0)` on window close before screenshots are written)
+- `LV_SDL_INCLUDE_PATH <SDL2/SDL.h>`
 - No `LV_USE_OS` (no RTOS)
 
 ## Build System
@@ -268,7 +294,8 @@ Screenshots:
   --screenshot-on-event   Screenshot after each event
 
 General:
-  --run-ms <ms>           Total simulation duration (headless; default: inferred from events)
+  --run-ms <ms>           Total simulation duration in headless mode
+                          Default: (time of last event or last wait completion) + 500ms
   --help                  Show usage
 ```
 
