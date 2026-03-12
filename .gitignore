@@ -8,6 +8,8 @@ host/.envrc
 
 # Firmware build artifacts
 firmware/build/
+firmware/test/test_notification
+firmware/test/test_config_store
 firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/managed_components/
