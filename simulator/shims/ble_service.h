@@ -1,5 +1,5 @@
-#ifndef SIM_BLE_SERVICE_H
-#define SIM_BLE_SERVICE_H
+#ifndef BLE_SERVICE_H
+#define BLE_SERVICE_H
 
 #include "notification.h"
 

@@ -23,6 +23,7 @@ add_executable(clawd-sim
     sim_main.c
     sim_display.c
     sim_screenshot.c
+    sim_events.c
     # Shared firmware sources (compiled unmodified)
     ${FIRMWARE_DIR}/scene.c
     ${FIRMWARE_DIR}/notification_ui.c
