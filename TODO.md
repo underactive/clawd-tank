@@ -4,7 +4,10 @@
 
 Firmware builds, flashes, and runs on the Waveshare ESP32-C6-LCD-1.47 board.
 BLE advertising works, notifications can be sent and dismissed via BLE GATT writes.
-All 37 tests pass (11 C + 26 Python). Clawd sprite animations and notification card UI are implemented.
+18 C tests pass, 40 Python tests pass (6 test files).
+Clawd sprite animations and notification card UI are implemented.
+NVS-backed config store supports brightness and sleep timeout with BLE read/write.
+macOS menu bar app provides daemon control and device configuration UI.
 
 ---
 
@@ -25,6 +28,21 @@ All 37 tests pass (11 C + 26 Python). Clawd sprite animations and notification c
 - [ ] **Text truncation and scrolling** — handle long project names and messages, scrolling for 5+ notifications
   - Truncation and clipping done (`snprintf` + `LV_LABEL_LONG_CLIP`). Marquee/scroll for overflow text not implemented.
 - [x] **Notification ordering** — render entries by insertion `seq` order instead of slot index
+
+## Configuration & Settings (New)
+
+- [x] **NVS-backed config store** — `config_store.c` persists brightness and sleep timeout to flash
+- [x] **BLE config characteristic** — read/write config values over BLE GATT
+- [x] **Display brightness control** — `display_set_brightness()` with runtime adjustment via config store
+- [x] **Runtime sleep timeout** — configurable via BLE, persisted to NVS
+
+## macOS Menu Bar App (New)
+
+- [x] **Status bar app** — `clawd_tank_menubar` package with daemon integration
+- [x] **Daemon observer protocol** — event-driven callbacks for BLE state changes
+- [x] **Slider controls** — brightness and sleep timeout sliders in menu
+- [x] **Daemon takeover** — menu bar app manages daemon lifecycle
+- [x] **Fix test import errors** — recreated host `.venv` (was pointing to old project path); all 40 tests pass
 
 ## Hook Integration (Setup)
 
@@ -47,6 +65,7 @@ Unchecked return values that can cause silent failures on hardware:
 
 - [x] **`_ble_sender` ValueError crash** — try/except ValueError in `_ble_sender` and `_replay_active`, logs error and continues
 - [x] **Failed BLE dismiss drops silently** (`daemon.py:79`) — now triggers reconnect + `_replay_active` on write failure instead of silently dropping
+- [x] **Daemon file lock** — prevent multiple daemon instances with file lock
 - [ ] **Socket length framing** (`socket_server.py:39`) — `reader.read(4096)` has no message boundary guarantee. Document the 4096-byte limit or switch to newline-framed messages
 - [ ] **`sys.exit(1)` in hook** (`clawd-notify:77`) — non-zero exit may surface errors in Claude Code. Consider `sys.exit(0)` since notifications are best-effort
 - [ ] **Log file context manager** (`clawd-notify:43`) — `open()` not in `with` block; `Popen` failure leaks the handle

@@ -12,7 +12,7 @@ Three components: **firmware** (ESP-IDF C), **simulator** (native macOS), **host
 
 ### Firmware (ESP-IDF 5.3.2)
 
-Environment is managed via direnv (`.envrc`). ESP-IDF path: `bsp/esp-idf/`.
+Environment is managed via direnv (`firmware/.envrc`). ESP-IDF path: `bsp/esp-idf/`.
 
 ```bash
 # Build
@@ -48,15 +48,20 @@ Interactive keys: `c`=connect, `d`=disconnect, `n`=notify, `1-8`=dismiss, `x`=cl
 
 ### Tests
 
+**Important:** Firmware and host use separate Python environments. Never install host dependencies (`bleak`, `rumps`, etc.) into the ESP-IDF venv or vice versa.
+
 ```bash
-# C unit tests (notification store)
+# C unit tests (notification store + config store)
 cd firmware/test && make test
 
-# Python tests (host daemon)
-cd host && pip install -r requirements-dev.txt && pytest
+# Python tests (host daemon) — use the host venv
+cd host && .venv/bin/pytest -v
 
 # Single Python test
-cd host && pytest tests/test_protocol.py -v
+cd host && .venv/bin/pytest tests/test_protocol.py -v
+
+# If host venv needs setup:
+cd host && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 ```
 
 ### Sprite Pipeline
