@@ -25,13 +25,14 @@ Claude Code hooks --> clawd-tank-notify --> daemon (BLE) --> ESP32-C6 display
 | `firmware/` | ESP-IDF firmware (LVGL UI, NimBLE GATT server, SPI display) | C |
 | `simulator/` | Native macOS simulator — runs the same firmware code without hardware | C |
 | `host/` | Background daemon + Claude Code hook handler | Python |
-| `tools/` | Sprite pipeline (PNG to RGB565 converter, pixel art editor) | Python |
+| `tools/` | Sprite pipeline (PNG to RLE-compressed RGB565), BLE debugging tool | Python |
 
 ## Hardware
 
 - **Board**: Waveshare ESP32-C6-LCD-1.47
 - **Display**: 1.47" 320x172 ST7789V (SPI), 16-bit RGB565
-- **SoC**: ESP32-C6 (RISC-V, single core), 4MB PSRAM (octal)
+- **SoC**: ESP32-C6FH8 (RISC-V, single core), 8MB flash, 4MB PSRAM (octal)
+- **RGB LED**: Onboard WS2812B on GPIO8 — flashes on incoming notifications
 - **Connectivity**: BLE 5.0 (NimBLE, peripheral role)
 
 ## Quick Start
@@ -77,12 +78,20 @@ pip install -r requirements.txt
 
 The daemon auto-starts on the first hook event. Logs at `~/.clawd-tank/daemon.log`.
 
+## Features
+
+- **Time display** — synced from host over BLE on connect (no WiFi/NTP needed)
+- **RGB LED flash** — onboard WS2812B flashes warm orange behind acrylic on new notifications
+- **RLE sprite compression** — all sprite assets compressed ~14:1 (13MB raw → ~900KB)
+- **Auto-reconnect** — daemon replays active notifications after BLE reconnect
+- **Config over BLE** — brightness and sleep timeout adjustable via config characteristic
+
 ## Clawd's Moods
 
 | State | When |
 |-------|------|
-| **Idle** | Connected, no notifications — Clawd hangs out, full-screen |
-| **Alert** | New notification arrives — Clawd shifts left, cards appear |
+| **Idle** | Connected, no notifications — Clawd hangs out, full-screen with clock |
+| **Alert** | New notification arrives — Clawd shifts left, cards appear, LED flashes |
 | **Happy** | Notifications dismissed |
 | **Sleeping** | 5 minutes of inactivity |
 | **Disconnected** | No BLE connection — "No connection" message |
@@ -99,13 +108,20 @@ cd host && pip install -r requirements-dev.txt && pytest
 
 ## Sprite Pipeline
 
-Clawd's animations are pixel art created in [Piskel](https://www.piskelapp.com/), exported as PNG frames, and converted to RGB565 C headers:
+Clawd's animations are pixel art created in [Piskel](https://www.piskelapp.com/), exported as PNG frames, and converted to RLE-compressed RGB565 C headers:
 
 ```bash
 python tools/png2rgb565.py frames/ output.h --name sprite_idle
 ```
 
 Web-based editors for each animation are in `tools/sprite-designer/`.
+
+## BLE Debugging
+
+```bash
+# Interactive BLE tool — connect, send notifications, read config
+python tools/ble_interactive.py
+```
 
 ## License
 
