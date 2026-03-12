@@ -1,7 +1,6 @@
 // firmware/main/ble_service.c
 #include "ble_service.h"
 #include "esp_log.h"
-#include "nvs_flash.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
@@ -9,6 +8,9 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 #include "cJSON.h"
+#include "config_store.h"
+#include "display.h"
+#include "ui_manager.h"
 #include <string.h>
 
 static const char *TAG = "ble";
@@ -25,6 +27,12 @@ static const ble_uuid128_t clawd_svc_uuid = BLE_UUID128_INIT(
 static const ble_uuid128_t notif_chr_uuid = BLE_UUID128_INIT(
     0x9a, 0x2d, 0x66, 0x16, 0x1b, 0x4b, 0x7a, 0x9a,
     0xc9, 0x47, 0x7a, 0x8b, 0x37, 0xb1, 0xff, 0x71
+);
+
+// Config Characteristic: E9F6E626-5FCA-4201-B80C-4D2B51C40F51
+static const ble_uuid128_t config_chr_uuid = BLE_UUID128_INIT(
+    0x51, 0x0f, 0xc4, 0x51, 0x2b, 0x4d, 0x0c, 0xb8,
+    0x01, 0x42, 0xca, 0x5f, 0x26, 0xe6, 0xf6, 0xe9
 );
 
 // Forward declarations
@@ -114,6 +122,63 @@ static int notification_write_cb(uint16_t conn_handle, uint16_t attr_handle,
     return 0;
 }
 
+static int config_access_cb(uint16_t conn_handle, uint16_t attr_handle,
+                             struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+        char buf[512];
+        uint16_t len = config_store_serialize_json(buf, sizeof(buf));
+        int rc = os_mbuf_append(ctxt->om, buf, len);
+        return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+    }
+
+    if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
+        if (len == 0 || len > 512) {
+            return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+        }
+
+        char wbuf[513];
+        uint16_t copied;
+        int rc = ble_hs_mbuf_to_flat(ctxt->om, wbuf, len, &copied);
+        if (rc != 0) {
+            return BLE_ATT_ERR_UNLIKELY;
+        }
+        wbuf[copied] = '\0';
+
+        cJSON *json = cJSON_ParseWithLength(wbuf, copied);
+        if (!json) {
+            ESP_LOGW(TAG, "Config: malformed JSON");
+            return BLE_ATT_ERR_UNLIKELY;
+        }
+
+        cJSON *brightness = cJSON_GetObjectItem(json, "brightness");
+        if (brightness && cJSON_IsNumber(brightness)) {
+            int val = brightness->valueint;
+            if (val >= 0 && val <= 255) {
+                config_store_set_brightness((uint8_t)val);
+                display_set_brightness((uint8_t)val);
+                ESP_LOGI(TAG, "Config: brightness=%d", val);
+            }
+        }
+
+        cJSON *sleep_timeout = cJSON_GetObjectItem(json, "sleep_timeout");
+        if (sleep_timeout && cJSON_IsNumber(sleep_timeout)) {
+            int val = sleep_timeout->valueint;
+            if (val >= 0 && val <= 3600) {
+                config_store_set_sleep_timeout((uint16_t)val);
+                ui_manager_set_sleep_timeout((uint32_t)val * 1000);
+                ESP_LOGI(TAG, "Config: sleep_timeout=%d", val);
+            }
+        }
+
+        cJSON_Delete(json);
+        return 0;
+    }
+
+    return 0;
+}
+
 static const struct ble_gatt_svc_def gatt_svcs[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
@@ -123,6 +188,11 @@ static const struct ble_gatt_svc_def gatt_svcs[] = {
                 .uuid = &notif_chr_uuid.u,
                 .access_cb = notification_write_cb,
                 .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
+            },
+            {
+                .uuid = &config_chr_uuid.u,
+                .access_cb = config_access_cb,
+                .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
             },
             { 0 },
         },
@@ -202,7 +272,6 @@ static void ble_host_task(void *param) {
 void ble_service_init(QueueHandle_t evt_queue) {
     s_evt_queue = evt_queue;
 
-    ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(nimble_port_init());
 
     int rc = ble_svc_gap_device_name_set("Clawd Tank");
