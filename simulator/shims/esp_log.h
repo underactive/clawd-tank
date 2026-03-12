@@ -9,4 +9,6 @@
 #define ESP_LOGD(tag, fmt, ...) /* no-op */
 #define ESP_LOGV(tag, fmt, ...) /* no-op */
 
+static inline const char *esp_err_to_name(int err) { (void)err; return "SIM_ERR"; }
+
 #endif

@@ -4,6 +4,7 @@
 #include "notification_ui.h"
 #include "notification.h"
 #include "config_store.h"
+#include "rgb_led.h"
 #include "esp_log.h"
 #include <stdio.h>
 #include <time.h>
@@ -89,7 +90,7 @@ static void transition_to(ui_state_t new_state)
     case UI_STATE_FULL_IDLE:
         scene_animate_width(SCENE_FULL_WIDTH, SCENE_ANIM_MS);
         notification_ui_show(s_notif_ui, false, 0);
-        scene_set_ble_icon_visible(s_scene, false);
+
         scene_set_time_visible(s_scene, true);
 
         /* Don't overwrite a oneshot animation (happy/alert) */
@@ -105,7 +106,7 @@ static void transition_to(ui_state_t new_state)
         scene_animate_width(SCENE_NOTIF_WIDTH,
                             old_state == UI_STATE_FULL_IDLE ? SCENE_ANIM_MS : 0);
         notification_ui_show(s_notif_ui, true, 300);
-        scene_set_ble_icon_visible(s_scene, false);
+
         scene_set_time_visible(s_scene, false);
         scene_set_clawd_anim(s_scene, CLAWD_ANIM_ALERT);
 
@@ -116,7 +117,7 @@ static void transition_to(ui_state_t new_state)
     case UI_STATE_DISCONNECTED:
         scene_animate_width(SCENE_FULL_WIDTH, SCENE_ANIM_MS);
         notification_ui_show(s_notif_ui, false, 0);
-        scene_set_ble_icon_visible(s_scene, true);
+
         scene_set_time_visible(s_scene, false);
         scene_set_clawd_anim(s_scene, CLAWD_ANIM_DISCONNECTED);
 
@@ -141,7 +142,6 @@ void ui_manager_init(void)
     s_scene = scene_create(screen);
     scene_set_width(s_scene, SCENE_FULL_WIDTH, 0);
     scene_set_clawd_anim(s_scene, CLAWD_ANIM_DISCONNECTED);
-    scene_set_ble_icon_visible(s_scene, true);
 
     /* Create notification UI (right panel — starts hidden) */
     s_notif_ui = notification_ui_create(screen);
@@ -150,6 +150,8 @@ void ui_manager_init(void)
     s_connected = false;
     s_last_activity_tick = lv_tick_get();
     s_last_minute = -1;
+
+    rgb_led_init();
 
     ESP_LOGI(TAG, "UI manager initialized with scene + notification panel");
 }
@@ -187,6 +189,8 @@ void ui_manager_handle_event(const ble_evt_t *evt)
         notification_ui_rebuild(s_notif_ui, &s_store);
         /* Show new notification in expanded hero view, then auto-collapse */
         notification_ui_trigger_hero(s_notif_ui);
+        /* Flash RGB LED behind acrylic */
+        rgb_led_flash(255, 140, 30, 800);
 
         if (s_state != UI_STATE_NOTIFICATION) {
             transition_to(UI_STATE_NOTIFICATION);
