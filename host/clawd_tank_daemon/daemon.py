@@ -2,10 +2,12 @@
 
 import asyncio
 import fcntl
+import json
 import logging
 import os
 import signal
 import sys
+import time
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
@@ -109,6 +111,21 @@ class ClawdDaemon:
         if self._observer:
             self._observer.on_notification_change(len(self._active_notifications))
 
+    async def _sync_time(self) -> None:
+        """Send current host time and timezone to the ESP32."""
+        epoch = int(time.time())
+        # Build POSIX TZ string from local UTC offset
+        # POSIX TZ signs are inverted: UTC+3 means 3 hours *west* of Greenwich
+        utc_offset = time.localtime().tm_gmtoff  # seconds east of UTC
+        sign = "-" if utc_offset >= 0 else "+"  # inverted for POSIX
+        abs_offset = abs(utc_offset)
+        hours, remainder = divmod(abs_offset, 3600)
+        minutes = remainder // 60
+        tz = f"UTC{sign}{hours}" if minutes == 0 else f"UTC{sign}{hours}:{minutes:02d}"
+        payload = json.dumps({"action": "set_time", "epoch": epoch, "tz": tz})
+        await self._ble.write_notification(payload)
+        logger.info("Synced time to ESP32: epoch %d, tz %s", epoch, tz)
+
     async def _replay_active(self) -> None:
         """Replay all active notifications after reconnect."""
         logger.info("Replaying %d active notifications", len(self._active_notifications))
@@ -169,16 +186,20 @@ class ClawdDaemon:
 
             was_connected = self._ble.is_connected
             await self._ble.ensure_connected()
-            if not was_connected and self._ble.is_connected and self._observer:
-                self._observer.on_connection_change(True)
+            if not was_connected and self._ble.is_connected:
+                await self._sync_time()
+                if self._observer:
+                    self._observer.on_connection_change(True)
 
             success = await self._ble.write_notification(payload)
 
             if not success:
                 was_connected = self._ble.is_connected
                 await self._ble.ensure_connected()
-                if not was_connected and self._ble.is_connected and self._observer:
-                    self._observer.on_connection_change(True)
+                if not was_connected and self._ble.is_connected:
+                    await self._sync_time()
+                    if self._observer:
+                        self._observer.on_connection_change(True)
                 await self._replay_active()
 
     async def run(self) -> None:

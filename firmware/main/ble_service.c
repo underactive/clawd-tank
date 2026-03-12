@@ -12,6 +12,8 @@
 #include "display.h"
 #include "ui_manager.h"
 #include <string.h>
+#include <stdlib.h>
+#include <sys/time.h>
 
 static const char *TAG = "ble";
 static QueueHandle_t s_evt_queue;
@@ -87,6 +89,21 @@ static void parse_notification_json(const char *buf, uint16_t len) {
         safe_strncpy(evt.id, id->valuestring, sizeof(evt.id));
     } else if (strcmp(action->valuestring, "clear") == 0) {
         evt.type = BLE_EVT_NOTIF_CLEAR;
+    } else if (strcmp(action->valuestring, "set_time") == 0) {
+        cJSON *epoch = cJSON_GetObjectItem(json, "epoch");
+        if (epoch && cJSON_IsNumber(epoch)) {
+            struct timeval tv = { .tv_sec = (time_t)epoch->valuedouble, .tv_usec = 0 };
+            settimeofday(&tv, NULL);
+            ESP_LOGI(TAG, "System time set to epoch %lld", (long long)tv.tv_sec);
+        }
+        cJSON *tz = cJSON_GetObjectItem(json, "tz");
+        if (tz && cJSON_IsString(tz)) {
+            setenv("TZ", tz->valuestring, 1);
+            tzset();
+            ESP_LOGI(TAG, "Timezone set to %s", tz->valuestring);
+        }
+        cJSON_Delete(json);
+        return;
     } else {
         ESP_LOGW(TAG, "Unknown action '%s', ignoring", action->valuestring);
         cJSON_Delete(json);
