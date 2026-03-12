@@ -59,7 +59,7 @@ The menu bar app uses `rumps`, which requires the PyObjC/NSApplication main loop
 
 A second GATT characteristic is added under the existing Clawd Tank service for device configuration.
 
-- **UUID**: new 128-bit UUID (to be generated at implementation time)
+- **UUID**: `E9F6E626-5FCA-4201-B80C-4D2B51C40F51`
 - **Flags**: `READ | WRITE | WRITE_NO_RSP`
 - **Max attribute size**: 512 bytes
 
@@ -89,7 +89,35 @@ Always returns the full current configuration:
 
 #### Long Read/Write Support
 
-The characteristic supports BLE Long Read (Read Blob) and Long Write (Prepare Write + Execute Write) for payloads exceeding ATT_MTU. NimBLE handles this at the GATT layer via the `offset` parameter in the access callback. Bleak handles it transparently on the client side.
+The characteristic supports BLE Long Read (Read Blob) and Long Write (Prepare Write + Execute Write) for payloads exceeding ATT_MTU.
+
+**Read (firmware side):** The read callback receives an `offset` parameter. On first call (offset=0), serialize the full config JSON into a static buffer. On subsequent calls (offset>0), return bytes starting at the offset. NimBLE issues multiple ATT Read Blob requests automatically until the client has the full value. The static buffer is safe because BLE is single-connection.
+
+```c
+static int config_read_cb(uint16_t conn_handle, uint16_t attr_handle,
+                           struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    static char buf[512];
+    static uint16_t buf_len = 0;
+
+    if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+        uint16_t offset = ctxt->offset;  // NimBLE provides this for Long Reads
+        if (offset == 0) {
+            // Serialize fresh config on first read
+            buf_len = config_store_serialize_json(buf, sizeof(buf));
+        }
+        if (offset >= buf_len) {
+            return 0;  // No more data
+        }
+        int rc = os_mbuf_append(ctxt->om, buf + offset, buf_len - offset);
+        return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+    }
+    // ... write handling
+}
+```
+
+**Write (firmware side):** For writes, NimBLE's Prepare Write queue assembles the full payload before invoking the access callback, so the write callback receives the complete JSON regardless of MTU. No special offset handling needed on writes.
+
+**Client side (bleak):** Bleak handles Long Read and Long Write transparently — `read_gatt_char()` and `write_gatt_char()` work without changes regardless of payload size.
 
 This ensures the protocol works correctly regardless of negotiated MTU size, and accommodates future config fields without requiring application-level fragmentation.
 
@@ -111,13 +139,19 @@ This ensures the protocol works correctly regardless of negotiated MTU size, and
 
 ### New Files
 
-- **`config_store.c/.h`** — NVS read/write operations, in-memory `device_config_t` struct, getter/setter functions used by `display.c` (brightness) and `ui_manager.c` (sleep timeout)
+- **`config_store.c/.h`** — NVS read/write operations, in-memory `device_config_t` struct, getter/setter functions. Public API:
+  - `void config_store_init(void)` — load from NVS (or defaults)
+  - `uint8_t config_store_get_brightness(void)` — current brightness value
+  - `uint32_t config_store_get_sleep_timeout_ms(void)` — current sleep timeout in ms
+  - `void config_store_set_brightness(uint8_t duty)` — update + NVS persist
+  - `void config_store_set_sleep_timeout(uint16_t seconds)` — update + NVS persist
+  - `uint16_t config_store_serialize_json(char *buf, uint16_t buf_sz)` — serialize full config to JSON, returns length
 
 ### Modified Files
 
-- **`ble_service.c`** — Add config characteristic to the GATT service definition. New read callback (serialize config to JSON, handle offset for Long Read) and write callback (parse partial JSON, update config store, apply settings)
-- **`display.c`** — Export a `display_set_brightness(uint8_t duty)` function. Initial brightness loaded from config store instead of hardcoded
-- **`ui_manager.c`** — Sleep timeout loaded from config store instead of hardcoded `SLEEP_TIMEOUT_MS`. Expose a function to update it at runtime
+- **`ble_service.c`** — Add config characteristic to the GATT service definition. Read callback uses `config_store_serialize_json()` with offset handling (see Long Read/Write section). Write callback parses partial JSON, calls `config_store_set_*` + `display_set_brightness()` / `ui_manager_set_sleep_timeout()` to apply immediately
+- **`display.c`** — Export `void display_set_brightness(uint8_t duty)` which calls `ledc_set_duty()` + `ledc_update_duty()` on `LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0`. Initial brightness loaded from `config_store_get_brightness()` instead of hardcoded 102. Call chain: `ble_service.c` includes `display.h` — no circular dependency since `display.h` is a leaf module with no includes beyond ESP-IDF
+- **`ui_manager.c`** — Replace `SLEEP_TIMEOUT_MS` macro with a static variable initialized from `config_store_get_sleep_timeout_ms()`. Export `void ui_manager_set_sleep_timeout(uint32_t ms)` to update it at runtime, also resets `s_last_activity_tick` so the new timeout takes effect from the current moment
 - **`main.c`** — Call `config_store_init()` before `display_init()` so initial brightness is available
 
 ## Host Changes
@@ -144,7 +178,10 @@ class DaemonObserver(Protocol):
     def on_notification_change(self, count: int) -> None: ...
 ```
 
-`ClawdDaemon.__init__` accepts an optional `observer: DaemonObserver`. The daemon calls these methods when BLE connection state changes or the active notification count changes.
+`ClawdDaemon.__init__` accepts an optional `observer: DaemonObserver`. Call sites:
+
+- **`on_connection_change(True)`** — called in `_ble_sender` after `ensure_connected()` succeeds (first connect or reconnect). Also requires a new `_on_ble_disconnect` callback registered with `ClawdBleClient` that calls `on_connection_change(False)`.
+- **`on_notification_change(count)`** — called at the end of `_handle_message` after updating `_active_notifications`, with `len(self._active_notifications)` as the count.
 
 ### New Package: `host/clawd_tank_menubar/`
 
@@ -152,7 +189,7 @@ class DaemonObserver(Protocol):
   - Creates `ClawdDaemon` with itself as observer
   - Runs asyncio loop in a daemon thread via `threading.Thread(daemon=True)`
   - Uses `asyncio.run_coroutine_threadsafe()` to call daemon methods from the main thread (e.g., sending config changes)
-  - Updates menu items from observer callbacks (dispatched to main thread via `rumps.Timer` or `PyObjC` performSelectorOnMainThread)
+  - Updates menu items from observer callbacks dispatched to the main thread via `PyObjCTools.AppHelper.callAfter()` (the standard way to schedule work on the AppKit main thread from a background thread; rumps re-exports PyObjC as a dependency)
 
 - **`icons/`** — macOS template images for status bar:
   - `crab-connected.png` — crab with green dot (connected, no notifications)
@@ -167,9 +204,9 @@ Defined in `setup.py` / `pyproject.toml`:
 - `clawd-tank-daemon` — existing, unchanged
 - `clawd-tank-menubar` — new, launches `clawd_tank_menubar.app:main`
 
-### New Dependency
+### New Dependencies
 
-- `rumps` — macOS status bar apps in Python
+- `rumps` — macOS status bar apps in Python (pulls in `pyobjc-framework-Cocoa` as a transitive dependency, which provides the PyObjC bridge needed for custom NSView menu items and `callAfter` main-thread dispatch)
 
 ## Menu Bar UI
 
@@ -215,13 +252,13 @@ Defined in `setup.py` / `pyproject.toml`:
 
 ### Brightness Slider
 
-Implemented as a custom `NSView` embedded in an `NSMenuItem`. Rumps supports this via `rumps.SliderMenuItem` or a custom view wrapper. The slider sends config writes as the user drags, debounced to avoid flooding BLE (e.g., send at most every 200ms).
+Implemented as a custom `NSSlider` inside an `NSView` embedded in an `NSMenuItem` via PyObjC. Rumps does not have a built-in slider menu item, so we create one using PyObjC directly: create an `NSView` containing an `NSSlider`, set it as the menu item's `view` property. The slider's target/action calls back into the app to send BLE config writes, debounced with a timestamp check (send at most every 200ms, flush final value on mouse-up).
 
 ### Launch at Login
 
 Implemented via a `launchd` user agent plist:
 - `~/Library/LaunchAgents/com.clawd-tank.menubar.plist`
-- Toggle writes/removes the plist and loads/unloads with `launchctl`
+- Toggle writes/removes the plist and uses `launchctl bootstrap`/`bootout` (the modern API on macOS 10.15+) to load/unload the agent
 
 ## Testing
 
@@ -238,5 +275,9 @@ Implemented via a `launchd` user agent plist:
 
 ### Integration
 
-- Simulator: extend BLE shim to support the config characteristic for end-to-end testing
+- Simulator: extend BLE shim in `simulator/shims/` to support the config characteristic. Add a simulated config store (in-memory `device_config_t` with JSON read/write handlers) and expose simulated brightness changes as log output. This allows `--events` to include config commands (e.g., `config '{"brightness":200}'`) for automated testing.
 - Manual: verify brightness slider updates display in real-time, sleep timeout change takes effect, NVS persistence across reboot
+
+### Error Handling
+
+- `write_config` returns `bool`. On failure, the menu bar app logs the error and shows a brief "Config write failed" status in the menu subtitle. No retry — the user can adjust the slider again. On disconnect during config write, the normal reconnect flow handles recovery; config is re-read on reconnect to sync the UI.
