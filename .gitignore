@@ -1,1 +1,23 @@
 .superpowers/
+
+# ESP-IDF
+bsp/esp-idf/
+.espressif/
+.envrc
+
+# Firmware build artifacts
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/managed_components/
+firmware/dependencies.lock
+
+# Python
+host/venv/
+host/.venv/
+*.pyc
+__pycache__/
+.pytest_cache/
+
+# Misc
+firebase-debug.log
