@@ -240,7 +240,7 @@ static void rebuild_display(notification_ui_t *ui)
         lv_obj_set_style_text_color(ui->featured_badge,
                                     lv_color_hex(0x88cc88), 0);
     } else {
-        char badge_buf[16];
+        char badge_buf[24];
         snprintf(badge_buf, sizeof(badge_buf), "%d/%d", fi + 1, count);
         lv_label_set_text(ui->featured_badge, badge_buf);
         lv_obj_set_style_text_color(ui->featured_badge,
