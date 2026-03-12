@@ -4,9 +4,11 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_log.h"
+#include "nvs_flash.h"
 #include "display.h"
 #include "ble_service.h"
 #include "ui_manager.h"
+#include "config_store.h"
 
 static const char *TAG = "clawd-tank";
 
@@ -37,6 +39,12 @@ void app_main(void) {
     // Create event queue (BLE -> UI)
     s_evt_queue = xQueueCreate(EVT_QUEUE_LEN, sizeof(ble_evt_t));
     assert(s_evt_queue);
+
+    // Init NVS (moved from ble_service_init — needed by config_store before BLE)
+    ESP_ERROR_CHECK(nvs_flash_init());
+
+    // Init config store — must be before display_init for brightness
+    config_store_init();
 
     // Init display (SPI + LVGL)
     display_init();
