@@ -4,10 +4,12 @@
 
 Firmware builds, flashes, and runs on the Waveshare ESP32-C6-LCD-1.47 board.
 BLE advertising works, notifications can be sent and dismissed via BLE GATT writes.
-18 C tests pass (with ASan+UBSan), 47 Python tests pass (6 test files).
+23 C tests pass (with ASan+UBSan), 68 Python tests pass (8 test files).
 Clawd sprite animations and notification card UI are implemented.
 NVS-backed config store supports brightness and sleep timeout with BLE read/write.
-macOS menu bar app provides daemon control and device configuration UI.
+macOS menu bar app provides daemon control, device configuration UI, and simulator toggle.
+Daemon supports multi-transport (BLE + TCP simulator) with dynamic add/remove at runtime.
+Simulator supports TCP listener (`--listen`) for daemon-driven operation without hardware.
 All 5 animated SVGs converted to full sprite frame sequences and integrated into scene.c:
 - idle: 96 frames, 135×135px, 6fps (frame buffer cap raised from 48→96)
 - alert: 40 frames, 135×135px, 10fps
@@ -41,6 +43,15 @@ All HAS_*_SPRITE conditional guards removed; sprites included unconditionally.
 - [x] **Test `_replay_active`** — 4 tests: sends all active, empty store, skips unknown events, concurrent mutation safe
 - [x] **Test BLE write failure → reconnect → replay path** — 2 tests: single and multi-notification replay after write failure
 - [x] **Test `cwd=""`** (empty string explicitly) — verified `Path("").name` triggers the `"unknown"` fallback
+
+## Simulator-Daemon Bridge (Major)
+
+- [x] **TCP socket listener in simulator** — background pthread with mutex-guarded ring buffer queue, newline-delimited JSON protocol matching BLE GATT format. `--listen [port]` CLI flag (default 19872). Shared JSON parser (`sim_ble_parse.c`) mirrors firmware's `parse_notification_json`.
+- [x] **Multi-transport daemon architecture** — `TransportClient` Protocol, `SimClient` TCP transport, per-transport queues and sender tasks. `--sim` / `--sim-only` CLI flags. Dynamic `add_transport`/`remove_transport` methods.
+- [x] **Per-transport observer status** — `on_connection_change` includes transport name. Menubar shows per-transport status lines (BLE/Simulator: Connected/Connecting...).
+- [x] **Simulator toggle in menubar** — "Enable Simulator" checkable menu item with preference persistence (`~/.clawd-tank/preferences.json`). Dynamically adds/removes sim transport at runtime.
+- [x] **Initial replay on connect** — `_transport_sender` replays active notifications after initial connect, so dynamically-added transports show existing notifications.
+- [x] **Stop hook support** — `protocol.py` handles Stop hook event to show "Waiting for input" notification immediately when Claude stops.
 
 ## Code Quality (Low Priority)
 

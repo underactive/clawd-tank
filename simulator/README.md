@@ -6,6 +6,8 @@ Supports two modes:
 - **Interactive** — SDL2 window with keyboard controls
 - **Headless** — No window, framebuffer-only with PNG screenshot capture
 
+Both modes support a **TCP listener** (`--listen`) that accepts the same JSON protocol as BLE, enabling the daemon to drive the simulator over TCP.
+
 ## Prerequisites
 
 - macOS with Xcode command line tools
@@ -26,6 +28,9 @@ cmake --build build
 
 ```bash
 ./build/clawd-tank-sim
+
+# With TCP listener for daemon connection
+./build/clawd-tank-sim --listen
 ```
 
 Opens a 960x516 window (320x172 scaled 3x). Keyboard shortcuts:
@@ -67,6 +72,7 @@ Change window scale with `--scale`:
 | `--screenshot-interval <ms>` | Capture a screenshot every N ms |
 | `--screenshot-on-event` | Capture a screenshot after each event |
 | `--run-ms <ms>` | Total simulation duration (headless only; defaults to last event + 500ms) |
+| `--listen [port]` | Start TCP listener for daemon connection (default: 19872) |
 | `--help` | Show help |
 
 ## Inline events
@@ -132,9 +138,30 @@ simulator/
   sim_display.c/h     LVGL display backend (framebuffer + SDL2)
   sim_events.c/h      Event injection (inline + JSON)
   sim_screenshot.c/h  PNG capture via stb_image_write
+  sim_ble_parse.c/h   Shared JSON parser for TCP bridge
+  sim_socket.c/h      TCP listener with thread-safe event queue
   sim_main.c          CLI, main loops (headless + interactive)
   lv_conf.h           LVGL config for native build
   CMakeLists.txt      Build system
 ```
 
 The simulator compiles the actual firmware source files from `firmware/main/` unmodified. Shim headers in `simulator/shims/` shadow ESP-IDF includes so they resolve at compile time without the ESP-IDF toolchain.
+
+## TCP Listener
+
+The `--listen` flag starts a TCP server that accepts the same newline-delimited JSON protocol used over BLE. This enables the full Claude Code → daemon → display pipeline without hardware.
+
+```bash
+# Start simulator with TCP listener
+./build/clawd-tank-sim --listen
+
+# Custom port
+./build/clawd-tank-sim --listen 12345
+
+# Headless + listen (runs indefinitely, daemon-driven)
+./build/clawd-tank-sim --headless --listen
+```
+
+The daemon connects via CLI flags (`--sim`, `--sim-only`) or via the "Enable Simulator" toggle in the macOS menu bar app. Default port: 19872.
+
+The TCP listener accepts one client at a time. When connected, the daemon sends JSON commands (`add`, `dismiss`, `clear`, `set_time`, `read_config`, `write_config`) and the simulator processes them identically to BLE events. The listener uses a background pthread with a mutex-guarded ring buffer queue to maintain LVGL thread safety.

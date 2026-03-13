@@ -11,13 +11,14 @@ Clawd Tank is a physical notification display built on a [Waveshare ESP32-C6-LCD
 ## How It Works
 
 ```
-Claude Code hooks --> clawd-tank-notify --> daemon (BLE) --> ESP32-C6 display
+Claude Code hooks --> clawd-tank-notify --> daemon --> BLE --> ESP32-C6 display
+                                                  \-> TCP --> Simulator (SDL2)
 ```
 
-1. **Claude Code hooks** fire on notifications (task complete, idle prompt, etc.)
+1. **Claude Code hooks** fire on notifications (task complete, idle prompt, stop, etc.)
 2. **clawd-tank-notify** forwards the event to a background Python daemon via Unix socket
-3. The **daemon** maintains a BLE connection and sends JSON payloads to the device
-4. The **firmware** renders Clawd + notification cards on the LCD via LVGL
+3. The **daemon** maintains connections to one or more transports (BLE hardware, TCP simulator) and sends JSON payloads
+4. The **firmware** (or simulator) renders Clawd + notification cards on the LCD via LVGL
 
 ## Components
 
@@ -49,6 +50,9 @@ cmake -B build && cmake --build build
 # Interactive mode — opens an SDL2 window
 ./build/clawd-tank-sim
 
+# Interactive + TCP listener — daemon can connect and drive it
+./build/clawd-tank-sim --listen
+
 # Headless mode — outputs PNG screenshots
 ./build/clawd-tank-sim --headless \
   --events 'connect; wait 500; notify "clawd-tank" "Waiting for input"; wait 2000; disconnect' \
@@ -56,6 +60,8 @@ cmake -B build && cmake --build build
 ```
 
 Interactive keys: `c` connect, `d` disconnect, `n` add notification, `1-8` dismiss, `x` clear, `s` screenshot, `q` quit.
+
+When `--listen` is active (default port 19872), the daemon can connect over TCP and drive the simulator with the same JSON protocol used over BLE, enabling the full Claude Code → daemon → display pipeline without hardware.
 
 See [simulator/README.md](simulator/README.md) for full CLI reference and JSON scenario support.
 
@@ -75,13 +81,19 @@ idf.py -p /dev/ttyACM0 flash monitor
 cd host
 pip install -r requirements.txt
 ./install-hooks.sh  # prints hook config for ~/.claude/settings.json
+
+# Run daemon with simulator transport
+python -m clawd_tank_daemon --sim
+
+# Run daemon with simulator only (no BLE)
+python -m clawd_tank_daemon --sim-only
 ```
 
 The daemon auto-starts on the first hook event. Logs at `~/.clawd-tank/daemon.log`.
 
 ### macOS Menu Bar App
 
-The menu bar app bundles the daemon with a status bar UI for controlling brightness, sleep timeout, and connection.
+The menu bar app bundles the daemon with a status bar UI for controlling brightness, sleep timeout, connection, and an optional simulator transport toggle.
 
 ```bash
 # Run from source
@@ -99,9 +111,11 @@ Pre-built DMGs are available on the [Releases](https://github.com/marciogranzott
 - **Time display** — synced from host over BLE on connect (no WiFi/NTP needed)
 - **RGB LED flash** — onboard WS2812B cycles through colors on new notifications
 - **RLE sprite compression** — all sprite assets compressed ~14:1 (13MB raw → ~900KB)
-- **Auto-reconnect** — daemon replays active notifications after BLE reconnect
-- **Config over BLE** — brightness and sleep timeout adjustable via config characteristic
-- **macOS menu bar app** — status bar icon with connection status, brightness slider, sleep timeout, and launch-at-login
+- **Multi-transport** — daemon supports BLE (hardware) and TCP (simulator) transports simultaneously
+- **Simulator bridge** — full pipeline works without hardware via `--listen` flag and TCP
+- **Auto-reconnect** — daemon replays active notifications after reconnect on any transport
+- **Config over BLE/TCP** — brightness and sleep timeout adjustable via config characteristic or TCP
+- **macOS menu bar app** — per-transport status, brightness slider, sleep timeout, simulator toggle, launch-at-login
 
 ## Clawd's Moods
 

@@ -38,13 +38,21 @@ cd simulator && cmake -B build && cmake --build build
 # Run interactive (SDL2 window, 3x scale)
 ./simulator/build/clawd-tank-sim
 
+# Run interactive with TCP listener (daemon can connect)
+./simulator/build/clawd-tank-sim --listen
+
 # Run headless with events
 ./simulator/build/clawd-tank-sim --headless \
   --events 'connect; wait 500; notify "clawd-tank" "Waiting for input"; wait 2000; disconnect' \
   --screenshot-dir ./shots/ --screenshot-on-event
+
+# Run headless with TCP listener (indefinite, daemon-driven)
+./simulator/build/clawd-tank-sim --headless --listen
 ```
 
 Interactive keys: `c`=connect, `d`=disconnect, `n`=notify, `1-8`=dismiss, `x`=clear, `s`=screenshot, `q`=quit.
+
+The `--listen` flag starts a TCP server on port 19872 (configurable: `--listen 12345`). The daemon connects via `--sim` or `--sim-only` flags, or via the "Enable Simulator" toggle in the menu bar app.
 
 ### Tests
 
@@ -84,6 +92,7 @@ python tools/ble_interactive.py
 
 ```
 Claude Code hooks → clawd-tank-notify → Unix socket → clawd_tank_daemon → BLE → ESP32-C6 firmware
+                                                                        ↘ TCP → Simulator (SDL2)
                                                                           ↓
                                                               ble_service → event queue → ui_manager
                                                                                             ↓
@@ -104,12 +113,17 @@ Claude Code hooks → clawd-tank-notify → Unix socket → clawd_tank_daemon �
 
 ### Simulator (`simulator/`)
 
-Compiles the **same firmware source files** unmodified. ESP-IDF APIs are replaced by shim headers in `simulator/shims/`. Uses SDL2 for display and stb_image_write for PNG capture. Supports inline event strings and JSON scenario files (`scenarios/`).
+Compiles the **same firmware source files** unmodified. ESP-IDF APIs are replaced by shim headers in `simulator/shims/`. Uses SDL2 for display and stb_image_write for PNG capture. Supports inline event strings, JSON scenario files (`scenarios/`), and a TCP listener (`--listen [port]`) that accepts the same newline-delimited JSON protocol as BLE, enabling the daemon to drive the simulator over TCP.
+
+Key simulator-specific files:
+- **sim_ble_parse.c/h** — Shared JSON parser for TCP bridge (mirrors firmware's `parse_notification_json`)
+- **sim_socket.c/h** — TCP listener with mutex-guarded ring buffer queue (background pthread, main thread drains)
 
 ### Host (`host/`)
 
 - **clawd-tank-notify** — Executable hook entry point. Reads Claude Code hook stdin, forwards to daemon via Unix socket.
-- **clawd_tank_daemon/** — Async Python daemon (asyncio + bleak). BLE client, notification tracking, replay on reconnect, time sync on connect.
+- **clawd_tank_daemon/** — Async Python daemon (asyncio). Multi-transport architecture with `TransportClient` Protocol. Supports BLE (`ClawdBleClient`) and TCP simulator (`SimClient`) transports with independent per-transport queues and sender tasks. Dynamic transport add/remove at runtime.
+- **clawd_tank_menubar/** — macOS status bar app (rumps). Per-transport status display, simulator toggle with preference persistence (`~/.clawd-tank/preferences.json`), brightness/sleep config.
 
 ## Key Constraints
 
