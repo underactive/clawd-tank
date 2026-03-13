@@ -197,7 +197,7 @@ int sim_socket_init(int port) {
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_port = htons((uint16_t)port),
-        .sin_addr.s_addr = htonl(INADDR_ANY),
+        .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
     };
 
     if (bind(s_listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {

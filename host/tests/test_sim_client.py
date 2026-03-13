@@ -81,7 +81,7 @@ async def test_write_config():
         await client.connect()
 
         result = await client.write_config(
-            json.dumps({"action": "write_config", "brightness": 200})
+            json.dumps({"brightness": 200})
         )
         assert result is True
 
@@ -89,7 +89,9 @@ async def test_write_config():
         await asyncio.sleep(0.05)
 
     assert len(received) == 1
-    assert json.loads(received[0])["brightness"] == 200
+    parsed = json.loads(received[0])
+    assert parsed["brightness"] == 200
+    assert parsed["action"] == "write_config"
 
 
 @pytest.mark.asyncio

@@ -103,8 +103,13 @@ class SimClient:
                 return {}
 
     async def write_config(self, payload: str) -> bool:
-        """Send a config write payload. Returns True on success."""
-        return await self.write_notification(payload)
+        """Send a config write payload. Wraps in action envelope for TCP protocol."""
+        try:
+            data = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            return False
+        data["action"] = "write_config"
+        return await self.write_notification(json.dumps(data))
 
     def _handle_disconnect(self) -> None:
         """Clean up state and notify on disconnect."""
