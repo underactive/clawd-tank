@@ -20,12 +20,16 @@ Two new async methods on `ClawdDaemon`:
 async def add_transport(self, name: str, client: TransportClient) -> None:
 ```
 
+- Wires the client's connect/disconnect callbacks to the daemon: `client._on_connect_cb = lambda: self._on_transport_connect(name)` and `client._on_disconnect_cb = lambda: self._on_transport_disconnect(name)`. This is necessary because `SimClient` takes these callbacks at construction time, but the menubar creates the client before passing it to the daemon.
 - Stores `client` in `self._transports[name]`
 - Creates `asyncio.Queue()` in `self._transport_queues[name]`
-- Enqueues current active notifications to the new queue (replay)
 - Creates and stores a sender task in `self._sender_tasks[name]`
 
-Requires storing sender tasks in a new `self._sender_tasks: dict[str, asyncio.Task]` dict. The existing `run()` method should also store tasks it creates in this dict (currently they are gathered anonymously).
+The sender task handles initial connection via the existing `_transport_sender` logic. No need to pre-populate the queue — the sender connects, syncs time, and replays.
+
+**Initial replay:** Currently `_transport_sender` only replays on write failure, not after initial connect. Add a `_replay_active_for()` call after the initial `_sync_time_for()` in `_transport_sender` so dynamically-added transports show existing notifications. This is harmless for BLE (no notifications at startup = replay sends nothing).
+
+Requires storing sender tasks in a new `self._sender_tasks: dict[str, asyncio.Task]` dict. The existing `run()` method must also store its tasks in this dict (currently they are gathered anonymously).
 
 #### `remove_transport(name)`
 
@@ -36,8 +40,11 @@ async def remove_transport(self, name: str) -> None:
 - Cancels the sender task and awaits clean cancellation (catch `CancelledError`)
 - Disconnects the client if connected
 - Removes entries from `_transports`, `_transport_queues`, and `_sender_tasks`
+- Fires `_on_transport_disconnect(name)` to update observer status
 
-The `_transport_sender` coroutine uses `asyncio.Queue.get()` which raises `CancelledError` when the task is cancelled — no additional handling needed in the sender.
+The sender task may be blocked in `SimClient.connect()`'s retry loop (`asyncio.sleep`) or in `Queue.get()` — both raise `CancelledError` cleanly when the task is cancelled.
+
+**Rapid toggle safety:** Since the menubar dispatches add/remove via `run_coroutine_threadsafe`, operations execute sequentially on the event loop. Rapid on/off/on toggling is safe — each remove fully completes (task cancelled, client disconnected) before the next add starts.
 
 ### 2. Per-Transport Status
 
@@ -47,7 +54,13 @@ The `_transport_sender` coroutine uses `asyncio.Queue.get()` which raises `Cance
 def on_connection_change(self, connected: bool, transport: str = "") -> None:
 ```
 
-The `transport` parameter defaults to `""` for backward compatibility. The daemon's `_on_transport_connect(name)` and `_on_transport_disconnect(name)` pass the transport name through.
+The `transport` parameter is added to `DaemonObserver` Protocol. **All existing implementations must be updated:**
+
+- `host/clawd_tank_menubar/app.py` — `ClawdTankApp.on_connection_change`
+- `host/tests/test_menubar.py` — `FakeObserver.on_connection_change`
+- `host/tests/test_observer.py` — `FakeObserver.on_connection_change`
+
+The daemon's `_on_transport_connect(name)` and `_on_transport_disconnect(name)` pass the transport name as the second argument.
 
 #### Menubar status tracking
 
@@ -57,16 +70,22 @@ self._transport_status: dict[str, bool] = {}
 
 Updated in `on_connection_change`. Used to render per-transport status lines.
 
+When the sim transport is enabled but the simulator is not running, the sender retries connection in the background (same as BLE scanning). Status shows `"Simulator: Connecting..."` until connected or disabled.
+
 #### Status display
 
-Replace the single status/subtitle pair with per-transport lines:
+Replace the single status/subtitle pair with per-transport status lines:
 
 ```
 BLE: Connected
-Simulator: Disconnected
+Simulator: Connecting...
 ```
 
 Display names: `"ble"` → `"BLE"`, `"sim"` → `"Simulator"`.
+
+States: `"Connected"`, `"Connecting..."` (enabled but not yet connected), `"Disconnected"` (was connected, lost connection — triggers reconnect).
+
+On startup before the sim toggle is enabled, only the BLE line is shown.
 
 #### Icon logic
 
@@ -76,7 +95,7 @@ Unchanged: connected if `any(self._transport_status.values())`, notification ico
 
 ```
 BLE: Connected
-Simulator: Disconnected
+Simulator: Connecting...
 ──────────────────────
 Brightness [slider]
 ──────────────────────
@@ -95,12 +114,12 @@ Quit Clawd Tank
 
 **"Enable Simulator" menu item** — checkable, placed after Sleep Timeout.
 
-- **Check (enable):** Creates `SimClient(port=19872)`, calls `daemon.add_transport("sim", client)` via `run_coroutine_threadsafe`. Sets menu item state to checked.
-- **Uncheck (disable):** Calls `daemon.remove_transport("sim")` via `run_coroutine_threadsafe`. Sets menu item state to unchecked. Removes `"sim"` from `_transport_status`.
+- **Check (enable):** Creates `SimClient(port=19872, on_connect_cb=..., on_disconnect_cb=...)`, calls `daemon.add_transport("sim", client)` via `run_coroutine_threadsafe`. Sets menu item state to checked. Adds `"sim": False` to `_transport_status` and shows "Simulator: Connecting..." immediately.
+- **Uncheck (disable):** Calls `daemon.remove_transport("sim")` via `run_coroutine_threadsafe`. Sets menu item state to unchecked. Removes `"sim"` from `_transport_status` and removes the Simulator status line.
 
 ### 5. Persistence
 
-Preference stored in `~/.config/clawd-tank/preferences.json`:
+Preference stored in `~/.clawd-tank/preferences.json` (consistent with existing daemon PID/lock file location):
 
 ```json
 {"sim_enabled": true}
@@ -112,7 +131,7 @@ Preference stored in `~/.config/clawd-tank/preferences.json`:
 
 ### 6. Shutdown
 
-`remove_transport` handles cleanup (cancel sender, disconnect client). The existing `_shutdown()` method should also cancel all sender tasks in `_sender_tasks` to ensure clean exit when the sim transport is active.
+The `_shutdown()` method must cancel all sender tasks in `_sender_tasks` (iterating values, cancelling, and awaiting each). This ensures dynamically-added transports (like sim) are cleaned up alongside statically-created ones (like BLE). The existing `run()` method's local task list should be replaced by `_sender_tasks`.
 
 ## Port
 
@@ -120,10 +139,11 @@ Fixed at `19872` (`SIM_DEFAULT_PORT`). Not configurable from the menu.
 
 ## Files Changed
 
-- `host/clawd_tank_daemon/daemon.py` — `add_transport`, `remove_transport`, `_sender_tasks` dict, updated `run()`, updated observer calls with transport name, updated `_shutdown`
-- `host/clawd_tank_menubar/app.py` — Toggle item, per-transport status display, preference load/save, startup sim init
-- `host/tests/test_daemon.py` — Tests for `add_transport`, `remove_transport`
-- `host/tests/test_menubar.py` — Tests for toggle state, preference persistence, per-transport observer updates
+- `host/clawd_tank_daemon/daemon.py` — `add_transport`, `remove_transport`, `_sender_tasks` dict, updated `run()` to use `_sender_tasks`, updated observer calls with transport name, updated `_shutdown` to cancel all sender tasks
+- `host/clawd_tank_menubar/app.py` — Toggle item, per-transport status display, preference load/save, startup sim init, updated `on_connection_change` signature
+- `host/tests/test_daemon.py` — Add tests for `add_transport`, `remove_transport`
+- `host/tests/test_menubar.py` — Add tests for toggle state, preference persistence; update `FakeObserver.on_connection_change` signature
+- `host/tests/test_observer.py` — Update `FakeObserver.on_connection_change` signature
 
 ## Not In Scope
 
