@@ -4,9 +4,10 @@ A tiny desktop aquarium for your Claude Code sessions.
 
 Clawd Tank is a physical notification display built on a [Waveshare ESP32-C6-LCD-1.47](https://www.waveshare.com/esp32-c6-lcd-1.47.htm) (320x172 ST7789). An animated pixel-art crab named Clawd lives on the screen, reacting to your coding session — alerting on new notifications, celebrating when you dismiss them, and sleeping when you're away.
 
-![Disconnected](assets/01_disconnected.png)
-![Idle](assets/02_idle.png)
-![Notifications](assets/03_notifications.png)
+<p align="center">
+  <img src="assets/sim-recordings/clawd-idle.gif" alt="Clawd idle" width="480">
+  <img src="assets/sim-recordings/clawd-notification.gif" alt="Clawd notification" width="480">
+</p>
 
 ## How It Works
 
@@ -124,13 +125,13 @@ The daemon auto-starts on the first hook event. Logs at `~/.clawd-tank/daemon.lo
 
 ## Clawd's Moods
 
-| State | When |
-|-------|------|
-| **Idle** | Connected, no notifications — Clawd hangs out, full-screen with clock |
-| **Alert** | New notification arrives — Clawd shifts left, cards appear, LED flashes |
-| **Happy** | Notifications dismissed |
-| **Sleeping** | 5 minutes of inactivity |
-| **Disconnected** | No BLE connection — "No connection" message |
+| State | When | |
+|-------|------|---|
+| **Idle** | Connected, no notifications — Clawd hangs out, full-screen with clock | ![Idle](assets/sim-recordings/clawd-idle.gif) |
+| **Alert** | New notification arrives — Clawd shifts left, cards appear, LED flashes | ![Alert](assets/sim-recordings/clawd-notification.gif) |
+| **Happy** | Notifications dismissed | ![Happy](assets/sim-recordings/clawd-happy.gif) |
+| **Sleeping** | 5 minutes of inactivity | ![Sleeping](assets/sim-recordings/clawd-sleeping.gif) |
+| **Disconnected** | No BLE connection — "No connection" message | ![Disconnected](assets/sim-recordings/clawd-disconnected.gif) |
 
 ## Tests
 
