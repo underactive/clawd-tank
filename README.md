@@ -25,7 +25,7 @@ Claude Code hooks --> clawd-tank-notify --> daemon (BLE) --> ESP32-C6 display
 |-----------|------|----------|
 | `firmware/` | ESP-IDF firmware (LVGL UI, NimBLE GATT server, SPI display) | C |
 | `simulator/` | Native macOS simulator — runs the same firmware code without hardware | C |
-| `host/` | Background daemon + Claude Code hook handler | Python |
+| `host/` | Background daemon, Claude Code hook handler, macOS menu bar app | Python |
 | `tools/` | Sprite pipeline (PNG to RLE-compressed RGB565), BLE debugging tool | Python |
 
 ## Hardware
@@ -79,13 +79,29 @@ pip install -r requirements.txt
 
 The daemon auto-starts on the first hook event. Logs at `~/.clawd-tank/daemon.log`.
 
+### macOS Menu Bar App
+
+The menu bar app bundles the daemon with a status bar UI for controlling brightness, sleep timeout, and connection.
+
+```bash
+# Run from source
+cd host && python -m clawd_tank_menubar
+
+# Or build a standalone .app
+cd host && pip install py2app && python setup.py py2app
+open "dist/Clawd Tank.app"
+```
+
+Pre-built DMGs are available on the [Releases](../../releases) page.
+
 ## Features
 
 - **Time display** — synced from host over BLE on connect (no WiFi/NTP needed)
-- **RGB LED flash** — onboard WS2812B flashes warm orange behind acrylic on new notifications
+- **RGB LED flash** — onboard WS2812B cycles through colors on new notifications
 - **RLE sprite compression** — all sprite assets compressed ~14:1 (13MB raw → ~900KB)
 - **Auto-reconnect** — daemon replays active notifications after BLE reconnect
 - **Config over BLE** — brightness and sleep timeout adjustable via config characteristic
+- **macOS menu bar app** — status bar icon with connection status, brightness slider, sleep timeout, and launch-at-login
 
 ## Clawd's Moods
 
