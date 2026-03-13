@@ -84,6 +84,8 @@ async def test_observer_connection_true_on_transport_sender_connect():
 
     async def fake_ensure():
         mock_transport.is_connected = True
+        # Real transports call on_connect_cb when connecting succeeds
+        daemon._on_transport_connect("ble")
 
     mock_transport.ensure_connected = AsyncMock(side_effect=fake_ensure)
     mock_transport.write_notification = AsyncMock(return_value=True)

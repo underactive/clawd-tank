@@ -15,6 +15,7 @@ from .ble_client import ClawdBleClient
 from .protocol import daemon_message_to_ble_payload
 from .sim_client import SimClient, SIM_DEFAULT_PORT
 from .socket_server import SocketServer
+from .transport import TransportClient
 
 logger = logging.getLogger("clawd-tank")
 
@@ -90,7 +91,7 @@ class ClawdDaemon:
         sim_port: int = 0,
         sim_only: bool = False,
     ):
-        self._transports: dict[str, object] = {}
+        self._transports: dict[str, TransportClient] = {}
         self._transport_queues: dict[str, asyncio.Queue] = {}
 
         if not sim_only:
@@ -177,6 +178,10 @@ class ClawdDaemon:
         """Process pending messages and send them over a named transport."""
         transport = self._transports[name]
         queue = self._transport_queues[name]
+        # Initial connection — retries until connected
+        await transport.ensure_connected()
+        if transport.is_connected:
+            await self._sync_time_for(transport)
         while self._running:
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=1.0)
@@ -192,8 +197,6 @@ class ClawdDaemon:
             await transport.ensure_connected()
             if not was_connected and transport.is_connected:
                 await self._sync_time_for(transport)
-                if self._observer:
-                    self._observer.on_connection_change(True)
 
             success = await transport.write_notification(payload)
 
@@ -202,8 +205,6 @@ class ClawdDaemon:
                 await transport.ensure_connected()
                 if not was_connected and transport.is_connected:
                     await self._sync_time_for(transport)
-                    if self._observer:
-                        self._observer.on_connection_change(True)
                 await self._replay_active_for(transport)
 
     def _write_pid(self) -> None:
@@ -270,7 +271,7 @@ class ClawdDaemon:
 
         tasks = []
         for name in self._transports:
-            tasks.append(asyncio.create_task(self._transports[name].connect()))
+            # Each sender handles its own connect via ensure_connected()
             tasks.append(asyncio.create_task(self._transport_sender(name)))
 
         await self._shutdown_event.wait()

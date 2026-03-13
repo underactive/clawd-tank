@@ -222,8 +222,8 @@ async def test_ble_write_failure_triggers_reconnect_and_replay():
     mock_transport.is_connected = True
     daemon._transports["ble"] = mock_transport
 
-    # First write fails; subsequent writes (from replay) succeed
-    write_results = [False, True, True]
+    # First write is sync_time (succeeds), second fails, rest succeed
+    write_results = [True, False, True, True]
     write_calls = []
 
     async def mock_write(payload):
@@ -272,8 +272,9 @@ async def test_ble_write_failure_replays_multiple_active():
     async def mock_write(payload):
         call_count[0] += 1
         write_calls.append(payload)
-        # Fail only on the very first write
-        if call_count[0] == 1:
+        # Fail on the second write (the queued dismiss).
+        # First write is the initial sync_time from _transport_sender.
+        if call_count[0] == 2:
             return False
         return True
 
@@ -299,8 +300,8 @@ async def test_ble_write_failure_replays_multiple_active():
         pass
 
     import json
-    # First call was the failing dismiss; subsequent calls are the replay writes
-    replayed_ids = {json.loads(p).get("id") for p in write_calls[1:] if json.loads(p).get("id")}
+    # write_calls: [0]=sync_time, [1]=failing dismiss, [2+]=replay writes
+    replayed_ids = {json.loads(p).get("id") for p in write_calls[2:] if json.loads(p).get("id")}
     assert "s1" in replayed_ids
     assert "s2" in replayed_ids
 
