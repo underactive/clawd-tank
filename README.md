@@ -109,13 +109,11 @@ cd host && pip install -r requirements-dev.txt && pytest
 
 ## Sprite Pipeline
 
-Clawd's animations are pixel art created in [Piskel](https://www.piskelapp.com/), exported as PNG frames, and converted to RLE-compressed RGB565 C headers:
+Clawd's animations are pixel art generated as SVG by Gemini 3.5 Pro, exported as PNG frames, and converted to RLE-compressed RGB565 C headers:
 
 ```bash
 python tools/png2rgb565.py frames/ output.h --name sprite_idle
 ```
-
-Web-based editors for each animation are in `tools/sprite-designer/`.
 
 ## BLE Debugging
 
