@@ -2,10 +2,12 @@
 #include "sim_display.h"
 #include "sim_events.h"
 #include "sim_screenshot.h"
+#include "sim_socket.h"
 #include "ui_manager.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <SDL.h>
 
 #define TICK_MS 33  /* ~30 fps */
@@ -19,6 +21,7 @@ static const char *opt_screenshot_dir = NULL;
 static int      opt_screenshot_interval = 0;
 static bool     opt_screenshot_on_event = false;
 static uint32_t opt_run_ms = 0;
+static int      opt_listen_port = 0;  /* 0 = disabled */
 
 static void print_usage(void)
 {
@@ -40,6 +43,7 @@ static void print_usage(void)
         "\n"
         "General:\n"
         "  --run-ms <ms>           Simulation duration (headless)\n"
+        "  --listen [port]         Listen for daemon TCP connections (default: 19872)\n"
         "  --help                  Show this help\n"
     );
 }
@@ -63,6 +67,13 @@ static void parse_args(int argc, char *argv[])
             opt_screenshot_on_event = true;
         } else if (strcmp(argv[i], "--run-ms") == 0 && i + 1 < argc) {
             opt_run_ms = (uint32_t)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--listen") == 0) {
+            /* Port is optional — check if next arg is a number */
+            if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') {
+                opt_listen_port = atoi(argv[++i]);
+            } else {
+                opt_listen_port = SIM_SOCKET_DEFAULT_PORT;
+            }
         } else if (strcmp(argv[i], "--help") == 0) {
             print_usage();
             exit(0);
@@ -107,7 +118,12 @@ static void run_headless(void)
         end_time = sim_events_get_end_time() + 500;
     }
 
-    printf("[sim] Headless mode: running %u ms of simulated time\n", end_time);
+    bool indefinite = (opt_listen_port > 0);
+    if (indefinite) {
+        printf("[sim] Headless + listen mode: running indefinitely (Ctrl-C to stop)\n");
+    } else {
+        printf("[sim] Headless mode: running %u ms of simulated time\n", end_time);
+    }
 
     uint32_t time = 0;
 
@@ -115,12 +131,20 @@ static void run_headless(void)
     ui_manager_tick();
     maybe_capture_periodic(time);
 
-    while (time < end_time) {
+    while (indefinite || time < end_time) {
+        if (indefinite) {
+            usleep(TICK_MS * 1000);
+        }
         time += TICK_MS;
         sim_advance_tick(TICK_MS);
 
         /* Fire any due events */
         bool event_fired = sim_events_process(time);
+
+        /* Process TCP socket events */
+        if (opt_listen_port > 0) {
+            sim_socket_process();
+        }
 
         /* LVGL tick */
         ui_manager_tick();
@@ -151,6 +175,11 @@ static void run_interactive(void)
         /* Process scripted events if any (using wall time) */
         if (opt_events || opt_scenario) {
             sim_events_process(SDL_GetTicks());
+        }
+
+        /* Process TCP socket events */
+        if (opt_listen_port > 0) {
+            sim_socket_process();
         }
 
         ui_manager_tick();
@@ -265,6 +294,14 @@ int main(int argc, char *argv[])
     if (opt_events) sim_events_init_inline(opt_events);
     if (opt_scenario) sim_events_init_scenario(opt_scenario);
 
+    /* 3b. Init TCP listener */
+    if (opt_listen_port > 0) {
+        if (sim_socket_init(opt_listen_port) != 0) {
+            fprintf(stderr, "Failed to start TCP listener on port %d\n", opt_listen_port);
+            return 1;
+        }
+    }
+
     /* 4. Init UI manager (creates scene + notification panel) */
     ui_manager_init();
 
@@ -279,6 +316,10 @@ int main(int argc, char *argv[])
     }
 
     /* 7. Cleanup */
+    /* 7a. Shutdown TCP listener */
+    if (opt_listen_port > 0) {
+        sim_socket_shutdown();
+    }
     sim_display_shutdown();
 
     return 0;
