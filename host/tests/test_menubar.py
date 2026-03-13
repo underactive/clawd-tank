@@ -72,3 +72,27 @@ def test_launchd_is_enabled_checks_plist():
         assert launchd.is_enabled() is True
         mock_path.exists.return_value = False
         assert launchd.is_enabled() is False
+
+
+import tempfile
+from pathlib import Path
+from clawd_tank_menubar.preferences import load_preferences, save_preferences
+
+def test_load_preferences_missing_file():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        prefs = load_preferences(Path(tmpdir) / "prefs.json")
+        assert prefs == {"sim_enabled": False}
+
+def test_save_and_load_preferences():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "subdir" / "prefs.json"
+        save_preferences(path, {"sim_enabled": True})
+        prefs = load_preferences(path)
+        assert prefs == {"sim_enabled": True}
+
+def test_load_preferences_malformed_json():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "prefs.json"
+        path.write_text("not json{{{")
+        prefs = load_preferences(path)
+        assert prefs == {"sim_enabled": False}
