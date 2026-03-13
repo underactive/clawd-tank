@@ -244,6 +244,31 @@ class ClawdDaemon:
             os.close(self._lock_fd)
             self._lock_fd = None
 
+    async def add_transport(self, name: str, client: TransportClient) -> None:
+        """Add a transport dynamically and start its sender task."""
+        client._on_connect_cb = lambda: self._on_transport_connect(name)
+        client._on_disconnect_cb = lambda: self._on_transport_disconnect(name)
+        self._transports[name] = client
+        self._transport_queues[name] = asyncio.Queue()
+        self._sender_tasks[name] = asyncio.create_task(self._transport_sender(name))
+
+    async def remove_transport(self, name: str) -> None:
+        """Stop sender task, disconnect client, and remove transport."""
+        if name in self._sender_tasks:
+            self._sender_tasks[name].cancel()
+            try:
+                await self._sender_tasks[name]
+            except asyncio.CancelledError:
+                pass
+            del self._sender_tasks[name]
+        if name in self._transports:
+            client = self._transports[name]
+            if client.is_connected:
+                await client.disconnect()
+            del self._transports[name]
+        self._transport_queues.pop(name, None)
+        self._on_transport_disconnect(name)
+
     async def read_config(self) -> dict:
         """Read config from the first connected transport."""
         for transport in self._transports.values():

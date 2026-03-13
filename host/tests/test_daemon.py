@@ -5,6 +5,18 @@ from unittest.mock import AsyncMock, patch
 from clawd_tank_daemon.daemon import ClawdDaemon
 
 
+class FakeObserver:
+    def __init__(self):
+        self.connection_changes = []
+        self.notification_changes = []
+
+    def on_connection_change(self, connected: bool, transport: str = "") -> None:
+        self.connection_changes.append((connected, transport))
+
+    def on_notification_change(self, count: int) -> None:
+        self.notification_changes.append(count)
+
+
 @pytest.mark.asyncio
 async def test_handle_add_tracks_notification():
     daemon = ClawdDaemon()
@@ -357,3 +369,155 @@ async def test_transport_sender_replays_active_on_initial_connect():
     replayed = json.loads(write_calls[1][0][0])
     assert replayed["action"] == "add"
     assert replayed["id"]  # has an id field
+
+
+# --- add_transport / remove_transport ---
+
+@pytest.mark.asyncio
+async def test_add_transport_creates_queue_and_sender():
+    """add_transport registers transport, creates queue, starts sender."""
+    daemon = ClawdDaemon()
+
+    mock_transport = AsyncMock()
+    mock_transport.is_connected = True
+    mock_transport.ensure_connected = AsyncMock()
+    mock_transport.write_notification = AsyncMock(return_value=True)
+
+    await daemon.add_transport("sim", mock_transport)
+
+    assert "sim" in daemon._transports
+    assert "sim" in daemon._transport_queues
+    assert "sim" in daemon._sender_tasks
+    assert not daemon._sender_tasks["sim"].done()
+
+    # Clean up
+    daemon._running = False
+    daemon._sender_tasks["sim"].cancel()
+    try:
+        await daemon._sender_tasks["sim"]
+    except asyncio.CancelledError:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_remove_transport_cancels_sender_and_disconnects():
+    """remove_transport cancels sender task and disconnects client."""
+    daemon = ClawdDaemon()
+
+    mock_transport = AsyncMock()
+    mock_transport.is_connected = True
+    mock_transport.ensure_connected = AsyncMock()
+    mock_transport.write_notification = AsyncMock(return_value=True)
+    mock_transport.disconnect = AsyncMock()
+
+    await daemon.add_transport("sim", mock_transport)
+    assert "sim" in daemon._sender_tasks
+
+    await daemon.remove_transport("sim")
+
+    assert "sim" not in daemon._transports
+    assert "sim" not in daemon._transport_queues
+    assert "sim" not in daemon._sender_tasks
+    mock_transport.disconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_add_transport_wires_callbacks():
+    """add_transport sets connect/disconnect callbacks on the client."""
+    daemon = ClawdDaemon()
+    obs = FakeObserver()
+    daemon._observer = obs
+
+    mock_transport = AsyncMock()
+    mock_transport.is_connected = True
+    mock_transport.ensure_connected = AsyncMock()
+    mock_transport.write_notification = AsyncMock(return_value=True)
+    mock_transport._on_connect_cb = None
+    mock_transport._on_disconnect_cb = None
+
+    await daemon.add_transport("sim", mock_transport)
+
+    # Callbacks should be wired
+    assert mock_transport._on_connect_cb is not None
+    assert mock_transport._on_disconnect_cb is not None
+
+    # Calling connect callback should notify observer
+    mock_transport._on_connect_cb()
+    assert len(obs.connection_changes) == 1
+    assert obs.connection_changes[0] == (True, "sim")
+
+    # Clean up
+    daemon._running = False
+    daemon._sender_tasks["sim"].cancel()
+    try:
+        await daemon._sender_tasks["sim"]
+    except asyncio.CancelledError:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_remove_transport_while_connecting():
+    """remove_transport cancels sender even when blocked in connect retry loop."""
+    daemon = ClawdDaemon()
+
+    mock_transport = AsyncMock()
+    mock_transport.is_connected = False
+    # ensure_connected blocks indefinitely (simulates connect retry loop)
+    mock_transport.ensure_connected = AsyncMock(side_effect=lambda: asyncio.sleep(999))
+    mock_transport.write_notification = AsyncMock(return_value=True)
+    mock_transport.disconnect = AsyncMock()
+
+    await daemon.add_transport("sim", mock_transport)
+    await asyncio.sleep(0.1)  # Let sender start and block in ensure_connected
+
+    await daemon.remove_transport("sim")
+
+    assert "sim" not in daemon._sender_tasks
+    assert "sim" not in daemon._transports
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_dynamically_added_transport():
+    """_shutdown cleans up sender tasks added via add_transport."""
+    daemon = ClawdDaemon()
+
+    mock_transport = AsyncMock()
+    mock_transport.is_connected = True
+    mock_transport.ensure_connected = AsyncMock()
+    mock_transport.write_notification = AsyncMock(return_value=True)
+    mock_transport.disconnect = AsyncMock()
+
+    await daemon.add_transport("sim", mock_transport)
+    assert "sim" in daemon._sender_tasks
+
+    await daemon._shutdown()
+
+    assert daemon._sender_tasks == {}
+    mock_transport.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handle_message_broadcasts_to_dynamically_added_transport():
+    """Messages broadcast to transports added via add_transport."""
+    daemon = ClawdDaemon()
+
+    mock_transport = AsyncMock()
+    mock_transport.is_connected = True
+    mock_transport.ensure_connected = AsyncMock()
+    mock_transport.write_notification = AsyncMock(return_value=True)
+
+    await daemon.add_transport("sim", mock_transport)
+
+    await daemon._handle_message(
+        {"event": "add", "session_id": "s1", "project": "p", "message": "m"}
+    )
+
+    assert daemon._transport_queues["sim"].qsize() == 1
+
+    # Clean up
+    daemon._running = False
+    daemon._sender_tasks["sim"].cancel()
+    try:
+        await daemon._sender_tasks["sim"]
+    except asyncio.CancelledError:
+        pass
