@@ -13,6 +13,18 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
     event_name = hook.get("hook_event_name", "")
     session_id = hook.get("session_id", "")
 
+    if event_name == "Stop":
+        cwd = hook.get("cwd", "")
+        project = Path(cwd).name if cwd else "unknown"
+        if not project:
+            project = "unknown"
+        return {
+            "event": "add",
+            "session_id": session_id,
+            "project": project,
+            "message": "Waiting for input",
+        }
+
     if event_name == "Notification":
         if hook.get("notification_type") != "idle_prompt":
             return None
