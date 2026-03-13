@@ -2,7 +2,7 @@
 
 A tiny desktop aquarium for your Claude Code sessions.
 
-Clawd Tank is a physical notification display built on a [Waveshare ESP32-C6-LCD-1.47](https://www.waveshare.com/esp32-c6-lcd-1.47.htm) (320x172 ST7789). An animated pixel-art crab named Clawd lives on the screen, reacting to your coding session — alerting on new notifications, celebrating when you dismiss them, and sleeping when you're away.
+Clawd Tank is a physical notification display built on a [Waveshare ESP32-C6-LCD-1.47](https://s.click.aliexpress.com/e/_c4PGS55v) (320x172 ST7789). An animated pixel-art crab named Clawd lives on the screen, reacting to your coding session — alerting on new notifications, celebrating when you dismiss them, and sleeping when you're away.
 
 <p align="center">
   <img src="assets/sim-recordings/clawd-idle.gif" alt="Clawd idle" width="480">
@@ -32,7 +32,7 @@ Claude Code hooks --> clawd-tank-notify --> daemon --> BLE --> ESP32-C6 display
 
 ## Hardware
 
-- **Board**: Waveshare ESP32-C6-LCD-1.47
+- **Board**: [Waveshare ESP32-C6-LCD-1.47](https://s.click.aliexpress.com/e/_c4PGS55v)
 - **Display**: 1.47" 320x172 ST7789V (SPI), 16-bit RGB565
 - **SoC**: ESP32-C6FH8 (RISC-V, single core), 8MB flash, 4MB PSRAM (octal)
 - **RGB LED**: Onboard WS2812B on GPIO8 — flashes on incoming notifications
