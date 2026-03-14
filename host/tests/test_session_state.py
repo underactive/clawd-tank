@@ -301,3 +301,76 @@ def test_session_with_empty_subagents_not_counted_as_working():
         "subagents": set(),
     }
     assert d._compute_display_state() == "idle"
+
+
+# --- Task 6: edge case tests and integration test ---
+
+@pytest.mark.asyncio
+async def test_session_end_clears_subagents():
+    """SessionEnd removes session entirely, even with active subagents."""
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "working", "last_event": time.time(), "subagents": {"a1", "a2"},
+    }
+    await d._handle_message({"event": "dismiss", "hook": "SessionEnd", "session_id": "s1"})
+    assert "s1" not in d._session_states
+    # Subsequent SubagentStop for orphaned agent is safe no-op
+    await d._handle_message({"event": "subagent_stop", "session_id": "s1", "agent_id": "a1"})
+    assert "s1" not in d._session_states
+
+@pytest.mark.asyncio
+async def test_duplicate_subagent_start_is_idempotent():
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "working", "last_event": time.time()}
+    await d._handle_message({"event": "subagent_start", "session_id": "s1", "agent_id": "a1"})
+    await d._handle_message({"event": "subagent_start", "session_id": "s1", "agent_id": "a1"})
+    assert d._session_states["s1"]["subagents"] == {"a1"}
+
+def test_working_session_with_subagents_counts_once():
+    """A session that is both state=working AND has subagents counts as 1, not 2."""
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "working", "last_event": time.time(), "subagents": {"a1"},
+    }
+    assert d._compute_display_state() == "working_1"
+
+@pytest.mark.asyncio
+async def test_subagent_lifecycle_prevents_sleeping():
+    """Full lifecycle: session starts, spawns subagent, parent goes idle,
+    subagent stops, then session can be evicted."""
+    d = make_daemon()
+
+    # Session starts and begins working
+    await d._handle_message({"event": "session_start", "session_id": "s1"})
+    assert d._compute_display_state() == "idle"
+
+    await d._handle_message({"event": "tool_use", "session_id": "s1"})
+    assert d._compute_display_state() == "working_1"
+
+    # Subagent spawned
+    await d._handle_message({"event": "subagent_start", "session_id": "s1", "agent_id": "a1"})
+    assert d._compute_display_state() == "working_1"
+
+    # Parent goes idle (Stop hook fires) — but subagent still running
+    await d._handle_message({
+        "event": "add", "hook": "Stop", "session_id": "s1",
+        "project": "proj", "message": "Waiting",
+    })
+    # Session state is "idle" but subagent keeps it counted as working
+    assert d._session_states["s1"]["state"] == "idle"
+    assert d._compute_display_state() == "working_1"
+
+    # Staleness check — should NOT evict (subagent active)
+    d._session_staleness_timeout = 0  # force everything to be "stale"
+    d._evict_stale_sessions()
+    assert "s1" in d._session_states
+
+    # Subagent finishes
+    await d._handle_message({"event": "subagent_stop", "session_id": "s1", "agent_id": "a1"})
+    assert d._compute_display_state() == "idle"
+
+    # Now staleness check CAN evict
+    d._session_states["s1"]["last_event"] = time.time() - 9999
+    d._evict_stale_sessions()
+    assert "s1" not in d._session_states
+    assert d._compute_display_state() == "sleeping"
