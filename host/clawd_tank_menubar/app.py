@@ -19,7 +19,7 @@ from .slider import create_slider_menu_item
 
 logger = logging.getLogger("clawd-tank.menubar")
 
-SLEEP_TIMEOUT_OPTIONS = [
+SESSION_TIMEOUT_OPTIONS = [
     ("1 minute", 60),
     ("2 minutes", 120),
     ("5 minutes", 300),
@@ -54,15 +54,15 @@ class ClawdTankApp(rumps.App, DaemonObserver):
         self._brightness_item = rumps.MenuItem("Brightness")
         self._brightness_item._menuitem.setView_(self._brightness_slider.view)
 
-        # Sleep timeout submenu
-        self._sleep_menu = rumps.MenuItem("Sleep Timeout")
-        self._sleep_timeout_value = 300
-        for label, seconds in SLEEP_TIMEOUT_OPTIONS:
-            item = rumps.MenuItem(label, callback=self._on_sleep_timeout_select)
+        # Session timeout submenu
+        self._session_timeout_menu = rumps.MenuItem("Session Timeout")
+        self._session_timeout_value = 300
+        for label, seconds in SESSION_TIMEOUT_OPTIONS:
+            item = rumps.MenuItem(label, callback=self._on_session_timeout_select)
             item._seconds = seconds
             if seconds == 300:
                 item.state = True
-            self._sleep_menu.add(item)
+            self._session_timeout_menu.add(item)
 
         # Simulator toggle
         self._sim_toggle = rumps.MenuItem("Enable Simulator", callback=self._on_toggle_simulator)
@@ -96,7 +96,7 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             None,
             self._brightness_item,
             None,
-            self._sleep_menu,
+            self._session_timeout_menu,
             None,
             self._sim_toggle,
             None,
@@ -200,8 +200,8 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             self._brightness_slider.set_enabled(True)
 
             timeout = self._current_config.get("sleep_timeout", 300)
-            self._sleep_timeout_value = timeout
-            for key, item in self._sleep_menu.items():
+            self._session_timeout_value = timeout
+            for key, item in self._session_timeout_menu.items():
                 item.state = (item._seconds == timeout)
 
             self._reconnect_item.set_callback(self._on_reconnect)
@@ -233,11 +233,11 @@ class ClawdTankApp(rumps.App, DaemonObserver):
                 self._daemon.write_config(payload), self._loop
             )
 
-    def _on_sleep_timeout_select(self, sender):
+    def _on_session_timeout_select(self, sender):
         seconds = sender._seconds
-        self._sleep_timeout_value = seconds
+        self._session_timeout_value = seconds
 
-        for key, item in self._sleep_menu.items():
+        for key, item in self._session_timeout_menu.items():
             item.state = (item._seconds == seconds)
 
         if self._loop and self._connected:
@@ -245,6 +245,10 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             asyncio.run_coroutine_threadsafe(
                 self._daemon.write_config(payload), self._loop
             )
+
+            # Update daemon staleness timeout
+            if self._daemon:
+                self._daemon.set_session_timeout(seconds)
 
     def _on_install_hooks(self, sender):
         if hooks.are_hooks_installed():
