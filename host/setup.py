@@ -1,5 +1,39 @@
 # host/setup.py — py2app configuration for Clawd Tank menubar app
+import subprocess
+from pathlib import Path
 from setuptools import setup
+
+
+def _bake_version():
+    """Generate _version_info.py with the current git version."""
+    try:
+        tag = subprocess.run(
+            ["git", "describe", "--tags", "--exact-match", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if tag.returncode == 0 and tag.stdout.strip():
+            version = tag.stdout.strip()
+        else:
+            branch = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True, timeout=5,
+            )
+            sha = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True, timeout=5,
+            )
+            b = branch.stdout.strip() if branch.returncode == 0 else "unknown"
+            s = sha.stdout.strip() if sha.returncode == 0 else "??????"
+            version = f"{b}@{s}"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        version = "unknown"
+
+    path = Path(__file__).parent / "clawd_tank_menubar" / "_version_info.py"
+    path.write_text(f'VERSION = "{version}"\n')
+    print(f"Baked version: {version}")
+
+
+_bake_version()
 
 APP = ["launcher.py"]
 DATA_FILES = []

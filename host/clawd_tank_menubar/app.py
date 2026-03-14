@@ -16,6 +16,7 @@ from clawd_tank_daemon.sim_client import SimClient, SIM_DEFAULT_PORT
 from . import hooks, launchd
 from .preferences import load_preferences, save_preferences
 from .slider import create_slider_menu_item
+from .version import get_version
 
 logger = logging.getLogger("clawd-tank.menubar")
 
@@ -123,6 +124,10 @@ class ClawdTankApp(rumps.App, DaemonObserver):
                 "Launchd plist points to a different executable — user should re-enable Launch at Login"
             )
 
+        # Version
+        self._version_item = rumps.MenuItem(f"Version: {get_version()}")
+        self._version_item.set_callback(None)
+
         # Quit
         self._quit_item = rumps.MenuItem("Quit Clawd Tank", callback=self._on_quit)
 
@@ -137,6 +142,7 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             self._hooks_item,
             self._login_item,
             None,
+            self._version_item,
             self._quit_item,
         ]
 
