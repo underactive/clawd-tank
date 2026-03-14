@@ -142,6 +142,7 @@ The daemon tracks per-session state and computes a single display state sent to 
 - **Intensity tiers**: 1 session working = Typing, 2 = Juggling, 3+ = Building
 - **Special events**: `PreCompact` → oneshot sweeping animation, `Notification` (idle_prompt) → confused
 - **Staleness eviction**: Sessions with no events within the configurable timeout (default 10min) are evicted. No sessions = sleeping.
+- **Subagent tracking**: `SubagentStart`/`SubagentStop` hooks track active `agent_id`s per session. Sessions with active subagents are never evicted and count as "working" in display state.
 
 ## Key Constraints
 
