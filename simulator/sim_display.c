@@ -82,6 +82,8 @@ lv_display_t *sim_display_init(bool headless, int scale)
             exit(1);
         }
 
+        SDL_RaiseWindow(s_window);
+
         s_renderer = SDL_CreateRenderer(s_window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
         if (!s_renderer) {
             fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
@@ -143,6 +145,14 @@ bool sim_display_should_quit(void)
 void sim_display_set_quit(void)
 {
     s_quit = true;
+}
+
+/* ---- Always-on-top ---- */
+
+void sim_display_set_pinned(bool pinned)
+{
+    if (!s_window) return;
+    SDL_SetWindowAlwaysOnTop(s_window, pinned ? SDL_TRUE : SDL_FALSE);
 }
 
 /* ---- Shutdown ---- */

@@ -31,6 +31,9 @@ void sim_display_shutdown(void);
 /** Signal that the window should close. */
 void sim_display_set_quit(void);
 
+/** Set window always-on-top (pinned). */
+void sim_display_set_pinned(bool pinned);
+
 /* Simulated time for headless mode */
 uint32_t sim_get_tick(void);
 void sim_advance_tick(uint32_t ms);

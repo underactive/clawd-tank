@@ -22,6 +22,7 @@ static int      opt_screenshot_interval = 0;
 static bool     opt_screenshot_on_event = false;
 static uint32_t opt_run_ms = 0;
 static int      opt_listen_port = 0;  /* 0 = disabled */
+static bool     opt_pinned = false;
 
 static void print_usage(void)
 {
@@ -31,6 +32,7 @@ static void print_usage(void)
         "Display:\n"
         "  --headless              Run without SDL2 window\n"
         "  --scale <N>             Window scale factor (default: 2)\n"
+        "  --pinned                Keep window always on top\n"
         "\n"
         "Events:\n"
         "  --events '<commands>'   Inline event string (semicolon-separated)\n"
@@ -67,6 +69,8 @@ static void parse_args(int argc, char *argv[])
             opt_screenshot_on_event = true;
         } else if (strcmp(argv[i], "--run-ms") == 0 && i + 1 < argc) {
             opt_run_ms = (uint32_t)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--pinned") == 0) {
+            opt_pinned = true;
         } else if (strcmp(argv[i], "--listen") == 0) {
             /* Port is optional — check if next arg is a number */
             if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') {
@@ -305,6 +309,11 @@ int main(int argc, char *argv[])
 
     /* 4. Init UI manager (creates scene + notification panel) */
     ui_manager_init();
+
+    /* 4b. Apply pinned mode */
+    if (opt_pinned) {
+        sim_display_set_pinned(true);
+    }
 
     /* 5. Init screenshots */
     if (opt_screenshot_dir) sim_screenshot_init(opt_screenshot_dir);
