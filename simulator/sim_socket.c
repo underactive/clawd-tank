@@ -323,15 +323,23 @@ bool sim_socket_process_window_cmds(void (*handler)(const sim_win_cmd_t *cmd)) {
 
 bool sim_socket_send_event(const char *json_line) {
     if (!json_line) return false;
-    pthread_mutex_lock(&s_client_mutex);
-    int fd = s_client_fd;
-    pthread_mutex_unlock(&s_client_mutex);
-    if (fd < 0) return false;
+
+    /* Build the full message (json + newline) before acquiring the mutex
+     * so we can send it in a single call while holding the lock. */
     size_t len = strlen(json_line);
-    ssize_t sent = send(fd, json_line, len, 0);
-    if (sent < 0) return false;
-    send(fd, "\n", 1, 0);
-    return true;
+    char buf[512];
+    if (len + 1 >= sizeof(buf)) return false;  /* message too long */
+    memcpy(buf, json_line, len);
+    buf[len] = '\n';
+
+    pthread_mutex_lock(&s_client_mutex);
+    if (s_client_fd < 0) {
+        pthread_mutex_unlock(&s_client_mutex);
+        return false;
+    }
+    ssize_t sent = send(s_client_fd, buf, len + 1, 0);
+    pthread_mutex_unlock(&s_client_mutex);
+    return sent >= 0;
 }
 
 void sim_socket_shutdown(void) {
