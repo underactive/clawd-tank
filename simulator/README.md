@@ -33,7 +33,7 @@ cmake --build build
 ./build/clawd-tank-sim --listen
 ```
 
-Opens a 960x516 window (320x172 scaled 3x). Keyboard shortcuts:
+Opens a 640x344 window (320x172 scaled 2x). Keyboard shortcuts:
 
 | Key | Action |
 |-----|--------|
@@ -43,6 +43,7 @@ Opens a 960x516 window (320x172 scaled 3x). Keyboard shortcuts:
 | `1`-`8` | Dismiss notification by index |
 | `x` | Clear all notifications |
 | `s` | Save screenshot to current directory |
+| `z` | Force sleep state |
 | `q` / `Esc` | Quit |
 
 Change window scale with `--scale`:
@@ -65,7 +66,8 @@ Change window scale with `--scale`:
 | Option | Description |
 |--------|-------------|
 | `--headless` | Run without SDL2 window |
-| `--scale <N>` | Window scale factor (default: 3) |
+| `--scale <N>` | Window scale factor (default: 2) |
+| `--pinned` | Keep window always on top |
 | `--events '<commands>'` | Inline event string (semicolon-separated) |
 | `--scenario <file.json>` | Load events from JSON scenario file |
 | `--screenshot-dir <dir>` | Output directory for PNG screenshots |
@@ -164,4 +166,14 @@ The `--listen` flag starts a TCP server that accepts the same newline-delimited 
 
 The daemon connects via CLI flags (`--sim`, `--sim-only`) or via the "Enable Simulator" toggle in the macOS menu bar app. Default port: 19872.
 
-The TCP listener accepts one client at a time. When connected, the daemon sends JSON commands (`add`, `dismiss`, `clear`, `set_time`, `read_config`, `write_config`) and the simulator processes them identically to BLE events. The listener uses a background pthread with a mutex-guarded ring buffer queue to maintain LVGL thread safety.
+The TCP listener accepts one client at a time. When connected, the daemon sends JSON commands (`add`, `dismiss`, `clear`, `set_time`, `set_status`, `read_config`, `write_config`) and the simulator processes them identically to BLE events. The listener uses a background pthread with a mutex-guarded ring buffer queue to maintain LVGL thread safety.
+
+### `set_status` command
+
+The daemon sends `set_status` to control Clawd's working animation based on active Claude Code sessions:
+
+```json
+{"action": "set_status", "status": "thinking"}
+```
+
+Valid status values: `sleeping`, `idle`, `thinking`, `working_1`, `working_2`, `working_3`, `confused`, `sweeping`.
