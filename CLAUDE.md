@@ -35,8 +35,11 @@ Requires CMake 3.16+ and SDL2 (`brew install sdl2`).
 # Build
 cd simulator && cmake -B build && cmake --build build
 
-# Run interactive (SDL2 window, 3x scale)
+# Run interactive (SDL2 window, 2x scale)
 ./simulator/build/clawd-tank-sim
+
+# Run interactive, always on top
+./simulator/build/clawd-tank-sim --pinned
 
 # Run interactive with TCP listener (daemon can connect)
 ./simulator/build/clawd-tank-sim --listen
@@ -50,7 +53,7 @@ cd simulator && cmake -B build && cmake --build build
 ./simulator/build/clawd-tank-sim --headless --listen
 ```
 
-Interactive keys: `c`=connect, `d`=disconnect, `n`=notify, `1-8`=dismiss, `x`=clear, `s`=screenshot, `q`=quit.
+Interactive keys: `c`=connect, `d`=disconnect, `n`=notify, `1-8`=dismiss, `x`=clear, `s`=screenshot, `z`=sleep, `q`=quit.
 
 The `--listen` flag starts a TCP server on port 19872 (configurable: `--listen 12345`). The daemon connects via `--sim` or `--sim-only` flags, or via the "Enable Simulator" toggle in the menu bar app.
 
@@ -75,6 +78,9 @@ cd host && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.tx
 ### Sprite Pipeline
 
 ```bash
+# Render animated SVG to PNG frame sequence
+python tools/svg2frames.py <input.svg> <output_dir/> --fps 8 --duration auto --scale 4
+
 # Convert PNG frames to RLE-compressed RGB565 C header
 python tools/png2rgb565.py <input_dir> <output.h> --name <sprite_name>
 ```
@@ -91,21 +97,22 @@ python tools/ble_interactive.py
 ### Data Flow
 
 ```
-Claude Code hooks (Stop/Notification/UserPromptSubmit/SessionEnd)
+Claude Code hooks (SessionStart/PreToolUse/PreCompact/Stop/Notification/UserPromptSubmit/SessionEnd)
     → ~/.clawd-tank/clawd-tank-notify → Unix socket → clawd_tank_daemon → BLE → ESP32-C6 firmware
                                                                         ↘ TCP → Simulator (SDL2)
-                                                                          ↓
-                                                              ble_service → event queue → ui_manager
-                                                                                            ↓
-                                                                              scene.c (sprites) + notification_ui.c (cards)
+    Session state tracking (daemon):
+        dict[session_id → state] → _compute_display_state() → set_status action → device animation
+
+    Notification cards (daemon):
+        add/dismiss events → _active_notifications → add/dismiss actions → device cards
 ```
 
 ### Firmware (`firmware/main/`)
 
 - **main.c** — Entry point. Creates FreeRTOS event queue, inits display/BLE, spawns `ui_task`.
-- **ble_service.c** — NimBLE GATT server. Parses JSON payloads (`add`/`dismiss`/`clear`/`set_time` actions), posts `ble_evt_t` to queue. Handles time sync and timezone from host.
-- **ui_manager.c** — State machine coordinator. Bridges BLE events to scene and notification UI. Manages sleep timeout (5 min), time display, RGB LED flash, LVGL tick.
-- **scene.c** — Clawd sprite animation engine. 5 states (IDLE, ALERT, HAPPY, SLEEPING, DISCONNECTED). Manages sky/stars/grass background and scene width transitions (107px with notifications, 320px idle).
+- **ble_service.c** — NimBLE GATT server. Parses JSON payloads (`add`/`dismiss`/`clear`/`set_time`/`set_status` actions), posts `ble_evt_t` to queue. Handles time sync and timezone from host.
+- **ui_manager.c** — State machine coordinator. Bridges BLE events to scene and notification UI. Handles `set_status` for working animations with backlight control for sleep/wake. Time display, RGB LED flash, LVGL tick.
+- **scene.c** — Clawd sprite animation engine. 11 states (IDLE, ALERT, HAPPY, SLEEPING, DISCONNECTED, THINKING, TYPING, JUGGLING, BUILDING, CONFUSED, SWEEPING). Fallback animation mechanism for oneshot return. Manages sky/stars/grass background and scene width transitions (107px with notifications, 320px idle).
 - **notification_ui.c** — LVGL card rendering. Auto-rotating featured card + compact list. 8-color accent palette.
 - **notification.c** — Ring buffer store (max 8 notifications). Tracks by 48-char ID + sequence counter.
 - **rgb_led.c** — WS2812B driver for onboard RGB LED (GPIO8). Non-blocking flash with linear fade-out via esp_timer.
@@ -114,7 +121,7 @@ Claude Code hooks (Stop/Notification/UserPromptSubmit/SessionEnd)
 
 ### Simulator (`simulator/`)
 
-Compiles the **same firmware source files** unmodified. ESP-IDF APIs are replaced by shim headers in `simulator/shims/`. Uses SDL2 for display and stb_image_write for PNG capture. Supports inline event strings, JSON scenario files (`scenarios/`), and a TCP listener (`--listen [port]`) that accepts the same newline-delimited JSON protocol as BLE, enabling the daemon to drive the simulator over TCP.
+Compiles the **same firmware source files** unmodified. ESP-IDF APIs are replaced by shim headers in `simulator/shims/`. Uses SDL2 for display and stb_image_write for PNG capture. Supports inline event strings, JSON scenario files (`scenarios/`), a TCP listener (`--listen [port]`), and always-on-top mode (`--pinned`).
 
 Key simulator-specific files:
 - **sim_ble_parse.c/h** — Shared JSON parser for TCP bridge (mirrors firmware's `parse_notification_json`)
@@ -123,8 +130,18 @@ Key simulator-specific files:
 ### Host (`host/`)
 
 - **clawd-tank-notify** — Standalone hook handler (installed to `~/.clawd-tank/clawd-tank-notify` by the menu bar app). Reads Claude Code hook stdin, converts to daemon message, forwards via Unix socket. Uses only stdlib — no external imports.
-- **clawd_tank_daemon/** — Async Python daemon (asyncio). Multi-transport architecture with `TransportClient` Protocol. Supports BLE (`ClawdBleClient`) and TCP simulator (`SimClient`) transports with independent per-transport queues and sender tasks. Dynamic transport add/remove at runtime.
-- **clawd_tank_menubar/** — macOS status bar app (rumps). Per-transport status display, simulator toggle with preference persistence (`~/.clawd-tank/preferences.json`), brightness/sleep config, Claude Code hook installer (`hooks.py`), log file output (`~/Library/Logs/ClawdTank/clawd-tank.log`).
+- **clawd_tank_daemon/** — Async Python daemon (asyncio). Multi-transport architecture with `TransportClient` Protocol. Supports BLE (`ClawdBleClient`) and TCP simulator (`SimClient`) transports with independent per-transport queues and sender tasks. Dynamic transport add/remove at runtime. Session state tracking with priority-based display state computation and staleness eviction.
+- **clawd_tank_menubar/** — macOS status bar app (rumps). Per-transport status display, simulator toggle with preference persistence (`~/.clawd-tank/preferences.json`), brightness/session timeout config, Claude Code hook installer (`hooks.py`), log file output (`~/Library/Logs/ClawdTank/clawd-tank.log`).
+
+### Session State Model
+
+The daemon tracks per-session state and computes a single display state sent to the device:
+
+- **Per-session states**: `registered` → `thinking` → `working` → `idle` → `confused`
+- **Display states** (priority order): `working_N` (1-3 sessions) > `thinking` > `confused` > `idle` > `sleeping`
+- **Intensity tiers**: 1 session working = Typing, 2 = Juggling, 3+ = Building
+- **Special events**: `PreCompact` → oneshot sweeping animation, `Notification` (idle_prompt) → confused
+- **Staleness eviction**: Sessions with no events within the configurable timeout (default 10min) are evicted. No sessions = sleeping.
 
 ## Key Constraints
 
