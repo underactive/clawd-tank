@@ -50,6 +50,8 @@ target_include_directories(clawd-tank-sim PRIVATE
     ${CMAKE_SOURCE_DIR}/cjson    # cJSON
 )
 
+target_compile_definitions(clawd-tank-sim PRIVATE SIMULATOR)
+
 target_link_libraries(clawd-tank-sim PRIVATE
     lvgl
     SDL2::SDL2

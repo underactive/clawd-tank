@@ -479,3 +479,19 @@ bool scene_is_playing_oneshot(scene_t *scene)
     if (def->looping) return false;
     return scene->frame_idx < def->frame_count - 1;
 }
+
+#ifdef SIMULATOR
+void scene_get_anim_info(scene_t *scene, int *frame_count, int *frame_ms)
+{
+    if (!scene) { *frame_count = 0; *frame_ms = 0; return; }
+    const anim_def_t *def = &anim_defs[scene->cur_anim];
+    *frame_count = def->frame_count;
+    *frame_ms = def->frame_ms;
+}
+
+int scene_get_frame_idx(scene_t *scene)
+{
+    if (!scene) return 0;
+    return scene->frame_idx;
+}
+#endif

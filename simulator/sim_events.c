@@ -121,6 +121,26 @@ void sim_events_init_inline(const char *events_str)
                 cJSON_Delete(json);
             }
         }
+        else if (strncmp(p, "status", 6) == 0) {
+            p += 6;
+            char status_str[32];
+            p = parse_quoted(p, status_str, sizeof(status_str));
+            int s = -1;
+            if (strcmp(status_str, "sleeping") == 0) s = DISPLAY_STATUS_SLEEPING;
+            else if (strcmp(status_str, "idle") == 0) s = DISPLAY_STATUS_IDLE;
+            else if (strcmp(status_str, "thinking") == 0) s = DISPLAY_STATUS_THINKING;
+            else if (strcmp(status_str, "working_1") == 0) s = DISPLAY_STATUS_WORKING_1;
+            else if (strcmp(status_str, "working_2") == 0) s = DISPLAY_STATUS_WORKING_2;
+            else if (strcmp(status_str, "working_3") == 0) s = DISPLAY_STATUS_WORKING_3;
+            else if (strcmp(status_str, "confused") == 0) s = DISPLAY_STATUS_CONFUSED;
+            else if (strcmp(status_str, "sweeping") == 0) s = DISPLAY_STATUS_SWEEPING;
+            if (s >= 0) {
+                ble_evt_t evt = { .type = BLE_EVT_SET_STATUS, .status = (uint8_t)s };
+                add_event(current_time, &evt, status_str);
+            } else {
+                fprintf(stderr, "[sim] Unknown status: %s\n", status_str);
+            }
+        }
         else if (strncmp(p, "notify", 6) == 0) {
             p += 6;
             ble_evt_t evt = { .type = BLE_EVT_NOTIF_ADD };

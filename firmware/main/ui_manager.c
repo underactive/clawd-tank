@@ -260,6 +260,18 @@ void ui_manager_handle_event(const ble_evt_t *evt)
     _lock_release(&s_lock);
 }
 
+#ifdef SIMULATOR
+void ui_manager_get_anim_info(int *frame_count, int *frame_ms)
+{
+    scene_get_anim_info(s_scene, frame_count, frame_ms);
+}
+
+int ui_manager_get_frame_idx(void)
+{
+    return scene_get_frame_idx(s_scene);
+}
+#endif
+
 /* ---------- Tick ---------- */
 
 void ui_manager_tick(void)

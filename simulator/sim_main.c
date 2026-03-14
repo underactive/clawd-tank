@@ -23,6 +23,8 @@ static bool     opt_screenshot_on_event = false;
 static uint32_t opt_run_ms = 0;
 static int      opt_listen_port = 0;  /* 0 = disabled */
 static bool     opt_pinned = false;
+static const char *opt_capture_anim = NULL;  /* status name for --capture-anim */
+static const char *opt_capture_dir = NULL;   /* output dir for --capture-anim */
 
 static void print_usage(void)
 {
@@ -33,6 +35,7 @@ static void print_usage(void)
         "  --headless              Run without SDL2 window\n"
         "  --scale <N>             Window scale factor (default: 2)\n"
         "  --pinned                Keep window always on top\n"
+        "  --capture-anim <status> <dir>  Capture one animation cycle as PNGs\n"
         "\n"
         "Events:\n"
         "  --events '<commands>'   Inline event string (semicolon-separated)\n"
@@ -71,6 +74,10 @@ static void parse_args(int argc, char *argv[])
             opt_run_ms = (uint32_t)atoi(argv[++i]);
         } else if (strcmp(argv[i], "--pinned") == 0) {
             opt_pinned = true;
+        } else if (strcmp(argv[i], "--capture-anim") == 0 && i + 2 < argc) {
+            opt_capture_anim = argv[++i];
+            opt_capture_dir = argv[++i];
+            opt_headless = true;  /* capture mode is always headless */
         } else if (strcmp(argv[i], "--listen") == 0) {
             /* Port is optional — check if next arg is a number */
             if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') {
@@ -161,6 +168,80 @@ static void run_headless(void)
     }
 
     printf("[sim] Done. Processed %u ms.\n", time);
+}
+
+/* ---- Capture animation mode ---- */
+
+static int parse_status_name(const char *name) {
+    if (strcmp(name, "sleeping") == 0) return DISPLAY_STATUS_SLEEPING;
+    if (strcmp(name, "idle") == 0) return DISPLAY_STATUS_IDLE;
+    if (strcmp(name, "thinking") == 0) return DISPLAY_STATUS_THINKING;
+    if (strcmp(name, "working_1") == 0) return DISPLAY_STATUS_WORKING_1;
+    if (strcmp(name, "working_2") == 0) return DISPLAY_STATUS_WORKING_2;
+    if (strcmp(name, "working_3") == 0) return DISPLAY_STATUS_WORKING_3;
+    if (strcmp(name, "confused") == 0) return DISPLAY_STATUS_CONFUSED;
+    if (strcmp(name, "sweeping") == 0) return DISPLAY_STATUS_SWEEPING;
+    return -1;
+}
+
+static void run_capture_anim(void)
+{
+    int status = parse_status_name(opt_capture_anim);
+    if (status < 0) {
+        fprintf(stderr, "Unknown status: %s\n", opt_capture_anim);
+        return;
+    }
+
+    sim_screenshot_init(opt_capture_dir);
+
+    /* Connect and set the status */
+    ble_evt_t connect_evt = { .type = BLE_EVT_CONNECTED };
+    ui_manager_handle_event(&connect_evt);
+
+    ble_evt_t status_evt = { .type = BLE_EVT_SET_STATUS, .status = (uint8_t)status };
+    ui_manager_handle_event(&status_evt);
+
+    /* Advance past the HAPPY oneshot (fires on connect) so the target
+     * animation takes over via the fallback mechanism. Keep advancing
+     * until the animation info matches the target (not HAPPY). */
+    int frame_count = 0, frame_ms = 0;
+    for (int t = 0; t < 5000; t += TICK_MS) {
+        sim_advance_tick(TICK_MS);
+        ui_manager_tick();
+        ui_manager_get_anim_info(&frame_count, &frame_ms);
+        /* HAPPY is 20 frames @ 100ms. Stop once we see different values. */
+        if (frame_count != 20 || frame_ms != 100) break;
+    }
+
+    printf("[capture] Animation '%s': %d frames, %dms/frame, %dms total\n",
+           opt_capture_anim, frame_count, frame_ms, frame_count * frame_ms);
+
+    /* Reset frame to 0 by briefly switching away and back */
+    ble_evt_t reset_evt = { .type = BLE_EVT_SET_STATUS, .status = DISPLAY_STATUS_IDLE };
+    ui_manager_handle_event(&reset_evt);
+    ui_manager_tick();
+    ui_manager_handle_event(&status_evt);
+
+    /* Render and capture each frame by advancing time exactly frame_ms per step */
+    for (int f = 0; f < frame_count; f++) {
+        /* Advance simulated time to trigger frame advance in scene_tick */
+        if (f > 0) {
+            sim_advance_tick(frame_ms);
+        }
+
+        /* Tick LVGL to render */
+        ui_manager_tick();
+
+        /* Capture framebuffer */
+        char suffix[32];
+        snprintf(suffix, sizeof(suffix), "%03d", f);
+        sim_screenshot_capture(sim_display_get_framebuffer(),
+                               SIM_LCD_H_RES, SIM_LCD_V_RES,
+                               f * frame_ms, suffix);
+    }
+
+    printf("[capture] Saved %d frames to %s/\n", frame_count, opt_capture_dir);
+    printf("frame_ms=%d\n", frame_ms);  /* machine-readable for the GIF script */
 }
 
 /* ---- Interactive main loop ---- */
@@ -319,7 +400,9 @@ int main(int argc, char *argv[])
     if (opt_screenshot_dir) sim_screenshot_init(opt_screenshot_dir);
 
     /* 6. Run */
-    if (opt_headless) {
+    if (opt_capture_anim) {
+        run_capture_anim();
+    } else if (opt_headless) {
         run_headless();
     } else {
         run_interactive();
