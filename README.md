@@ -16,10 +16,10 @@ Claude Code hooks --> clawd-tank-notify --> daemon --> BLE --> ESP32-C6 display
                                                   \-> TCP --> Simulator (SDL2)
 ```
 
-1. **Claude Code hooks** (`Stop`, `Notification`, `UserPromptSubmit`, `SessionEnd`) fire on session events
+1. **Claude Code hooks** (`SessionStart`, `PreToolUse`, `PreCompact`, `Stop`, `Notification`, `UserPromptSubmit`, `SessionEnd`) fire on session events
 2. **clawd-tank-notify** (`~/.clawd-tank/clawd-tank-notify`) forwards the event to the daemon via Unix socket
-3. The **daemon** maintains connections to one or more transports (BLE hardware, TCP simulator) and sends JSON payloads
-4. The **firmware** (or simulator) renders Clawd + notification cards on the LCD via LVGL
+3. The **daemon** tracks per-session state, computes a display state, and sends JSON payloads to connected transports (BLE hardware, TCP simulator)
+4. The **firmware** (or simulator) renders Clawd's working animation + notification cards on the LCD via LVGL
 
 ## Components
 
@@ -28,7 +28,7 @@ Claude Code hooks --> clawd-tank-notify --> daemon --> BLE --> ESP32-C6 display
 | `firmware/` | ESP-IDF firmware (LVGL UI, NimBLE GATT server, SPI display) | C |
 | `simulator/` | Native macOS simulator — runs the same firmware code without hardware | C |
 | `host/` | Background daemon, Claude Code hook handler, macOS menu bar app | Python |
-| `tools/` | Sprite pipeline (PNG to RLE-compressed RGB565), BLE debugging tool | Python |
+| `tools/` | Sprite pipeline (SVG to PNG to RLE-compressed RGB565), GIF recorder, BLE debugging | Python |
 
 ## Hardware
 
@@ -60,7 +60,7 @@ cmake -B build && cmake --build build
   --screenshot-dir ./shots/ --screenshot-on-event
 ```
 
-Interactive keys: `c` connect, `d` disconnect, `n` add notification, `1-8` dismiss, `x` clear, `s` screenshot, `q` quit.
+Interactive keys: `c` connect, `d` disconnect, `n` add notification, `1-8` dismiss, `x` clear, `s` screenshot, `z` sleep, `q` quit.
 
 When `--listen` is active (default port 19872), the daemon can connect over TCP and drive the simulator with the same JSON protocol used over BLE, enabling the full Claude Code → daemon → display pipeline without hardware.
 
@@ -89,7 +89,7 @@ cd host && pip install py2app && python setup.py py2app
 open "dist/Clawd Tank.app"
 ```
 
-On launch, the app automatically installs a hook handler script to `~/.clawd-tank/clawd-tank-notify`. To connect it to Claude Code, click **"Install Claude Code Hooks"** in the menu bar dropdown — this adds the required hooks to `~/.claude/settings.json`. Restart any running Claude Code sessions for hooks to take effect.
+On launch, the app automatically installs a hook handler script to `~/.clawd-tank/clawd-tank-notify`. To connect it to Claude Code, click **"Install Claude Code Hooks"** in the menu bar dropdown — this adds the required hooks to `~/.claude/settings.json`. If hooks were previously installed, clicking again will update them to the latest version. Restart any running Claude Code sessions for hooks to take effect.
 
 Logs are written to `~/Library/Logs/ClawdTank/clawd-tank.log`.
 
@@ -114,23 +114,41 @@ The daemon auto-starts on the first hook event. Logs at `~/.clawd-tank/daemon.lo
 
 ## Features
 
+- **Working animations** — real-time session-aware animations driven by Claude Code hooks (thinking, typing, juggling, building, confused, sweeping)
+- **Workload meter** — animation intensity scales with concurrent sessions: 1 = typing, 2 = juggling, 3+ = building
+- **Session tracking** — daemon tracks per-session state with priority-based display resolution and staleness eviction
 - **Time display** — synced from host over BLE on connect (no WiFi/NTP needed)
 - **RGB LED flash** — onboard WS2812B cycles through colors on new notifications
 - **RLE sprite compression** — all sprite assets compressed ~14:1 (13MB raw → ~900KB)
 - **Multi-transport** — daemon supports BLE (hardware) and TCP (simulator) transports simultaneously
 - **Simulator bridge** — full pipeline works without hardware via `--listen` flag and TCP
-- **Auto-reconnect** — daemon replays active notifications after reconnect on any transport
-- **Config over BLE/TCP** — brightness and sleep timeout adjustable via config characteristic or TCP
-- **macOS menu bar app** — per-transport status, brightness slider, sleep timeout, simulator toggle, hook installer, launch-at-login
+- **Auto-reconnect** — daemon replays active notifications and display state after reconnect on any transport
+- **Config over BLE/TCP** — brightness and session timeout adjustable via config characteristic or TCP
+- **macOS menu bar app** — per-transport status, brightness slider, session timeout, simulator toggle, hook installer, launch-at-login
 
 ## Clawd's Moods
+
+### Working Animations
+
+Clawd's animation reflects what Claude is doing across all active sessions:
+
+| State | When | |
+|-------|------|---|
+| **Thinking** | User submitted a prompt, Claude is reasoning | ![Thinking](assets/sim-recordings/clawd-thinking.gif) |
+| **Typing** | 1 session using tools | ![Typing](assets/sim-recordings/clawd-typing.gif) |
+| **Juggling** | 2 sessions using tools simultaneously | ![Juggling](assets/sim-recordings/clawd-juggling.gif) |
+| **Building** | 3+ sessions using tools simultaneously | ![Building](assets/sim-recordings/clawd-building.gif) |
+| **Confused** | Claude has been waiting 60s+ for user input | ![Confused](assets/sim-recordings/clawd-confused.gif) |
+| **Sweeping** | Context compaction (PreCompact) — oneshot | ![Sweeping](assets/sim-recordings/clawd-sweeping.gif) |
+
+### Notification & Lifecycle
 
 | State | When | |
 |-------|------|---|
 | **Idle** | Connected, no notifications — Clawd hangs out, full-screen with clock | ![Idle](assets/sim-recordings/clawd-idle.gif) |
 | **Alert** | New notification arrives — Clawd shifts left, cards appear, LED flashes | ![Alert](assets/sim-recordings/clawd-notification.gif) |
 | **Happy** | Notifications dismissed | ![Happy](assets/sim-recordings/clawd-happy.gif) |
-| **Sleeping** | 5 minutes of inactivity | ![Sleeping](assets/sim-recordings/clawd-sleeping.gif) |
+| **Sleeping** | No active sessions — all sessions ended or evicted | ![Sleeping](assets/sim-recordings/clawd-sleeping.gif) |
 | **Disconnected** | No BLE connection — "No connection" message | ![Disconnected](assets/sim-recordings/clawd-disconnected.gif) |
 
 ## Tests
@@ -145,10 +163,18 @@ cd host && pip install -r requirements-dev.txt && pytest
 
 ## Sprite Pipeline
 
-Clawd's animations are pixel art generated as SVG by Gemini 3.1 Pro, exported as PNG frames, and converted to RLE-compressed RGB565 C headers:
+Clawd's animations are pixel art generated as animated SVGs, rendered to PNG frame sequences, and converted to RLE-compressed RGB565 C headers:
 
 ```bash
-python tools/png2rgb565.py frames/ output.h --name sprite_idle
+# SVG animation → PNG frames (requires Playwright)
+python tools/svg2frames.py assets/svg-animations/clawd-working-thinking.svg /tmp/frames/ \
+  --fps 8 --duration auto --scale 4
+
+# PNG frames → C header
+python tools/png2rgb565.py /tmp/frames/ firmware/main/assets/sprite_thinking.h --name thinking
+
+# Record seamlessly-looping GIFs of all animations (for docs)
+python tools/record_gif.py --all assets/captures/
 ```
 
 ## BLE Debugging
