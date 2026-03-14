@@ -74,6 +74,20 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
             "session_id": session_id,
         }
 
+    if event_name == "SubagentStart":
+        return {
+            "event": "subagent_start",
+            "session_id": session_id,
+            "agent_id": hook.get("agent_id", ""),
+        }
+
+    if event_name == "SubagentStop":
+        return {
+            "event": "subagent_stop",
+            "session_id": session_id,
+            "agent_id": hook.get("agent_id", ""),
+        }
+
     return None
 
 
@@ -85,7 +99,7 @@ def daemon_message_to_ble_payload(msg: dict) -> Optional[str]:
     """
     event = msg["event"]
 
-    if event in ("session_start", "tool_use", "compact"):
+    if event in ("session_start", "tool_use", "compact", "subagent_start", "subagent_stop"):
         return None
 
     if event == "add":
