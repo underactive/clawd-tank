@@ -20,14 +20,14 @@ This design eliminates that manual step: the simulator binary ships inside the `
 
 Add a `STATIC_SDL2` CMake option to `simulator/CMakeLists.txt`:
 
-- `STATIC_SDL2=ON`: downloads a pinned SDL2 release tarball, builds it as a static library, and links it into the simulator binary. Produces a self-contained arm64 executable with no dynamic dependencies beyond system frameworks (Cocoa, libSystem).
+- `STATIC_SDL2=ON`: downloads a pinned SDL2 release tarball (>= 2.0.16 for `SDL_SetWindowAlwaysOnTop` support), builds it as a static library, and links it into the simulator binary. Produces a self-contained arm64 executable with no dynamic dependencies beyond system frameworks (Cocoa, IOKit, CoreAudio, CoreVideo, Metal, Carbon, ForceFeedback, AudioToolbox, libSystem).
 - `STATIC_SDL2=OFF` (default): uses system/Homebrew SDL2 via `find_package`, preserving the current local development workflow.
 
 SDL2 is zlib-licensed — static linking is permitted.
 
 ### New TCP Commands
 
-The simulator's TCP listener (`--listen`) gains three new JSON actions:
+The simulator's TCP listener (`--listen`) gains three new JSON actions for window management:
 
 | Action | Payload | Effect |
 |---|---|---|
@@ -35,18 +35,37 @@ The simulator's TCP listener (`--listen`) gains three new JSON actions:
 | `hide_window` | `{"action":"hide_window"}` | Hides the SDL window (`SDL_HideWindow`), process stays alive |
 | `set_window` | `{"action":"set_window","pinned":true\|false}` | Toggles always-on-top |
 
+**Command routing in `sim_socket.c`:** Window commands cannot go through `sim_ble_parse_json()` because they don't produce a `ble_evt_t`. Instead, `sim_socket.c` recognizes these actions before calling the BLE parser and dispatches them to a new window command queue (similar to the existing `ble_evt_t` queue). The main thread drains this queue in the event loop and calls SDL functions (`SDL_ShowWindow`, `SDL_HideWindow`, `SDL_SetWindowAlwaysOnTop`) on the main thread where SDL operations are safe.
+
+### Bidirectional TCP Communication
+
+The current TCP protocol is primarily unidirectional (menu app → simulator), with the only response being `read_config`. This design adds simulator → menu app events.
+
+**Simulator side:** A new outbound message function in `sim_socket.c` writes JSON lines to the client socket. Access to the client fd is mutex-guarded (the socket thread already uses a mutex for the inbound queue). The main thread calls this function when it needs to notify the menu app of state changes.
+
+**SimClient side:** `SimClient` gains a background reader task that continuously reads lines from the TCP connection. When it receives an event (e.g., `{"event":"window_hidden"}`), it invokes a callback on the `SimProcessManager`. The existing `read_config()` request-response pattern is preserved by using a response future that the background reader fulfills when it sees a config response.
+
+**Events sent from simulator to menu app:**
+
+| Event | Payload | Trigger |
+|---|---|---|
+| `window_hidden` | `{"event":"window_hidden"}` | User closes the SDL window (Cmd+W / red X) |
+
 ### Window Close Behavior
 
 When the user closes the SDL window (SDL_QUIT / Cmd+W), instead of exiting the process:
 
 1. The window is hidden (`SDL_HideWindow`)
-2. The process continues running headless, accepting TCP commands
-3. A `{"event":"window_hidden"}` JSON message is sent back over the TCP connection so the menu app can update its toggle state
+2. The render loop pauses (skips `SDL_RenderPresent` and texture updates while hidden to save CPU; LVGL ticks continue so animation state stays current)
+3. The process continues running, accepting TCP commands
+4. A `{"event":"window_hidden"}` JSON message is sent to the menu app via the outbound TCP channel
+5. On `show_window`, the render loop resumes from the current animation state
 
 ### Launch Flag Changes
 
-- `--borderless` becomes the default when launched without `--headless` (override with `--bordered` for development)
-- New `--hidden` flag: creates the window but starts it hidden. The menu app uses this combined with the `show_window` TCP command for controlled initial launch.
+- The simulator window is already always borderless (unconditional `SDL_WINDOW_BORDERLESS` in `sim_display.c`). Add a `--bordered` flag to override this for development use.
+- New `--hidden` flag: initializes SDL and creates the window but starts it hidden (`SDL_HideWindow` immediately after creation). The menu app uses this combined with the `show_window` TCP command for controlled initial launch.
+- `--hidden` and `--headless` are mutually exclusive. `--headless` skips SDL initialization entirely (no window, no renderer). `--hidden` initializes SDL fully but hides the window. If both are specified, `--headless` takes precedence.
 
 ## Menu Bar App Changes
 
@@ -63,6 +82,8 @@ Both BLE and Simulator become independently enable/disable-able transports with 
 }
 ```
 
+**Preferences read-modify-write:** `save_preferences()` currently overwrites the entire file with the provided dict. This must change to a read-modify-write pattern: load existing preferences from disk, merge the changed key(s), write back. This prevents toggling one preference from clobbering others. `load_preferences()` must also merge with `DEFAULTS` so that missing keys (from older preference files) get their default values rather than being absent.
+
 On startup, the daemon reads preferences and only creates transports that are enabled. Toggling "Enabled" in a submenu:
 
 - **Enable**: creates the transport client, adds it to the daemon, starts connecting. For simulator: also spawns the process.
@@ -72,13 +93,21 @@ On startup, the daemon reads preferences and only creates transports that are en
 
 New class `SimProcessManager` in `clawd_tank_daemon/`:
 
-- **Spawning**: launches `clawd-tank-sim --listen --borderless --hidden` as a subprocess
-- **Binary discovery**: looks for the binary at `os.path.join(os.path.dirname(sys.executable), 'clawd-tank-sim')` (inside `.app` bundle), falls back to `shutil.which('clawd-tank-sim')` for development
-- **Window control**: sends show/hide/pinned TCP commands via the existing SimClient connection
+- **Spawning**: launches `clawd-tank-sim --listen --hidden` as a subprocess
+- **Binary discovery**: looks for the binary using `NSBundle.mainBundle().bundlePath` + `/Contents/MacOS/clawd-tank-sim` when running inside a `.app` bundle, falls back to `os.path.join(os.path.dirname(sys.executable), 'clawd-tank-sim')`, then `shutil.which('clawd-tank-sim')` for development
+- **Window control**: sends show/hide/pinned TCP commands via `SimClient.send_command()` (new method for non-notification JSON payloads)
+- **Event handling**: receives `window_hidden` events from `SimClient`'s background reader and updates the menu bar toggle state
 - **Process monitoring**: if the process crashes, logs it and updates status. No auto-restart.
+- **Port conflict handling**: before spawning, attempts a TCP connect to the target port. If something is already listening, logs a warning and connects `SimClient` to the existing instance without spawning a new process. This handles the case where a standalone `clawd-tank-sim --listen` is already running.
 - **Clean shutdown**: SIGTERM → wait → SIGKILL on disable or app quit
 
-The SimClient remains unchanged — it connects to `127.0.0.1:19872` over TCP. The process manager is a layer above it that owns the subprocess lifecycle.
+### SimClient Changes
+
+`SimClient` gains:
+
+- **`send_command(payload: dict)`**: sends an arbitrary JSON command (used for `show_window`, `hide_window`, `set_window`). Distinct from `write_notification()` which wraps payloads in notification format.
+- **Background reader task**: continuously reads lines from the TCP connection. Dispatches events to a callback. Routes `read_config` responses to a future for the existing request-response pattern.
+- **`on_event` callback**: set by `SimProcessManager` to receive simulator events like `window_hidden`.
 
 ### Menu Bar UI
 
@@ -125,25 +154,39 @@ Status: Disabled
   Enabled
 ```
 
-**Status indicators** on the top-level transport items:
-- `●` green — connected / running
-- `●` yellow — connecting / launching
-- `○` gray — disabled (text also dimmed)
+**Simulator status states:**
+
+| State | Status text | Indicator |
+|---|---|---|
+| Process starting | Launching... | ● yellow |
+| Process running, TCP connecting | Connecting... | ● yellow |
+| Process running, TCP connected | Running | ● green |
+| Process crashed / not running | Stopped | ● red |
+| Disabled | Disabled | ○ gray |
+
+**BLE status states:**
+
+| State | Status text | Indicator |
+|---|---|---|
+| Scanning / connecting | Connecting... | ● yellow |
+| Connected | Connected | ● green |
+| Disabled | Disabled | ○ gray |
 
 **Menu bar icon**: reflects aggregate state — connected crab if any transport is connected, disconnected crab if none are, notification crab if there are active notifications. Per-transport detail lives in the submenus.
 
 ### Defaults
 
 - BLE: enabled
-- Simulator: enabled, window visible, borderless, always on top
+- Simulator: enabled, window visible, always on top
 - Both transports active out of the box for the best first-run experience
 
 ### Window Behavior
 
-- Simulator window is always borderless (no title bar)
+- Simulator window is always borderless (no title bar) — this is existing behavior
 - Always on top by default, toggleable from the simulator submenu
-- Closing the SDL window (red X / Cmd+W) hides the window — process stays alive, same as toggling "Show Window" off
-- Show/hide controlled via the simulator submenu or by the `show_window`/`hide_window` TCP commands
+- Closing the SDL window (red X / Cmd+W) hides the window — process stays alive, same as toggling "Show Window" off. Menu toggle updates via the `window_hidden` TCP event.
+- Show/hide controlled via the simulator submenu, which sends `show_window`/`hide_window` TCP commands
+- When hidden, the render loop pauses to save CPU. Animation state stays current via LVGL ticks.
 
 ### Both Transports Disabled
 
@@ -187,8 +230,8 @@ macOS runner: `macos-14` (arm64 Apple Silicon).
 
 **Existing users upgrading:**
 
-- **Preferences**: no migration code needed. `load_preferences()` falls back to defaults for missing keys. Existing `sim_enabled: false` is preserved. New keys (`ble_enabled`, `sim_window_visible`, `sim_always_on_top`) get their defaults.
-- **Note**: the default for `sim_enabled` changes from `false` to `true`, but existing users who never toggled it already have `{"sim_enabled": false}` on disk, so their behavior is unchanged.
+- **Preferences**: `load_preferences()` changes to merge loaded preferences with `DEFAULTS`, so missing keys get default values. `save_preferences()` changes to read-modify-write. Existing `sim_enabled: false` is preserved on disk. New keys (`ble_enabled`, `sim_window_visible`, `sim_always_on_top`) get their defaults via the merge.
+- **Note**: the default for `sim_enabled` changes from `false` to `true`, but existing users who previously toggled the simulator already have `{"sim_enabled": false}` on disk, so their behavior is unchanged. New users get both transports enabled.
 - **Hooks**: unchanged — same script, same settings.
 - **Launchd plist**: if the user switches from a dev install to the bundled `.app`, the plist's `ProgramArguments` will point to the old Python interpreter path. On startup, detect if the plist exists but points to a different executable than the current one, and prompt the user to re-enable "Launch at Login".
 - **Menu structure**: changes from flat to submenus. No user data affected.
