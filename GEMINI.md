@@ -62,6 +62,6 @@ cd simulator && cmake -B build && cmake --build build
 
 You can use the interactive keys (`z`=sleep, `x`=clear, `n`=notify) to trigger different state transitions and verify that the sprite animations render cleanly without clipping or color key issues.
 
-## TODO Tracking
+## Plan Tracking
 
-If your animation work spans multiple sessions or requires firmware integration steps you can't complete immediately, update `TODO.md` to track the progress of the asset pipeline.
+If your animation work spans multiple sessions or requires firmware integration steps you can't complete immediately, create an execution plan in `docs/exec-plans/active/` (template in `docs/PLANS.md`) to track the progress of the asset pipeline. When the plan is finished, move it to `docs/exec-plans/completed/` and add an entry to the **Completed plans** table in `docs/PLANS.md`.
