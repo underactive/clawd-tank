@@ -11,11 +11,13 @@ static const char *NVS_NAMESPACE = "clawd_cfg";
 
 static uint8_t  s_brightness;
 static uint16_t s_sleep_timeout_secs;
+static bool     s_display_flipped;
 
 void config_store_init(void)
 {
     s_brightness = CONFIG_DEFAULT_BRIGHTNESS;
     s_sleep_timeout_secs = CONFIG_DEFAULT_SLEEP_TIMEOUT;
+    s_display_flipped = CONFIG_DEFAULT_DISPLAY_FLIPPED;
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, 1 /* NVS_READWRITE */, &handle);
@@ -36,6 +38,12 @@ void config_store_init(void)
         ESP_LOGI(TAG, "Loaded sleep_timeout=%u from NVS", t);
     }
 
+    uint8_t f;
+    if (nvs_get_u8(handle, "disp_flip", &f) == ESP_OK) {
+        s_display_flipped = (f != 0);
+        ESP_LOGI(TAG, "Loaded display_flipped=%u from NVS", (unsigned)s_display_flipped);
+    }
+
     nvs_close(handle);
 }
 
@@ -47,6 +55,11 @@ uint8_t config_store_get_brightness(void)
 uint32_t config_store_get_sleep_timeout_ms(void)
 {
     return (uint32_t)s_sleep_timeout_secs * 1000;
+}
+
+bool config_store_get_display_flipped(void)
+{
+    return s_display_flipped;
 }
 
 void config_store_set_brightness(uint8_t duty)
@@ -73,11 +86,23 @@ void config_store_set_sleep_timeout(uint16_t seconds)
     }
 }
 
+void config_store_set_display_flipped(bool flipped)
+{
+    s_display_flipped = flipped;
+
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, 1, &handle) == ESP_OK) {
+        nvs_set_u8(handle, "disp_flip", flipped ? 1 : 0);
+        nvs_commit(handle);
+        nvs_close(handle);
+    }
+}
+
 uint16_t config_store_serialize_json(char *buf, uint16_t buf_sz)
 {
     int n = snprintf(buf, buf_sz,
-        "{\"brightness\":%u,\"sleep_timeout\":%u}",
-        s_brightness, s_sleep_timeout_secs);
+        "{\"brightness\":%u,\"sleep_timeout\":%u,\"display_flipped\":%u}",
+        s_brightness, s_sleep_timeout_secs, (unsigned)s_display_flipped);
     if (n < 0 || (uint16_t)n >= buf_sz) {
         if (buf_sz > 0) buf[0] = '\0';
         return 0;

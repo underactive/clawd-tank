@@ -268,6 +268,33 @@ static int config_access_cb(uint16_t conn_handle, uint16_t attr_handle,
             }
         }
 
+        /* Accept bool (true/false) or number (0/1) — the menubar sends a
+         * Python True/False which cJSON parses as bool, but number form keeps
+         * us compatible with ad-hoc clients. The actual mirror flip + LVGL
+         * full-screen invalidate runs on the UI task (see ui_manager.c) — this
+         * task only persists the value and notifies. */
+        cJSON *display_flipped = cJSON_GetObjectItem(json, "display_flipped");
+        if (display_flipped) {
+            bool val = false;
+            bool recognized = true;
+            if (cJSON_IsBool(display_flipped)) {
+                val = cJSON_IsTrue(display_flipped);
+            } else if (cJSON_IsNumber(display_flipped)) {
+                val = (display_flipped->valueint != 0);
+            } else {
+                recognized = false;
+            }
+            if (recognized) {
+                config_store_set_display_flipped(val);
+                ble_evt_t ev = { .type = BLE_EVT_SET_DISPLAY_FLIPPED };
+                ev.status = val ? 1 : 0;
+                if (xQueueSend(s_evt_queue, &ev, pdMS_TO_TICKS(0)) != pdTRUE) {
+                    ESP_LOGW(TAG, "Config: display_flipped event queue full");
+                }
+                ESP_LOGI(TAG, "Config: display_flipped=%d", (int)val);
+            }
+        }
+
         cJSON_Delete(json);
         return 0;
     }

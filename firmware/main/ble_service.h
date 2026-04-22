@@ -29,6 +29,9 @@ typedef enum {
     BLE_EVT_SET_SESSIONS,
     BLE_EVT_CONNECTED,
     BLE_EVT_DISCONNECTED,
+    /* Config change that needs UI-task execution (LVGL + SPI access).
+     * The boolean value rides in the `status` field of ble_evt_t. */
+    BLE_EVT_SET_DISPLAY_FLIPPED,
 } ble_evt_type_t;
 
 typedef struct {

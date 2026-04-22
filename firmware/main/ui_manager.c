@@ -352,6 +352,15 @@ void ui_manager_handle_event(const ble_evt_t *evt)
         s_last_activity_tick = lv_tick_get();
         break;
     }
+
+    case BLE_EVT_SET_DISPLAY_FLIPPED:
+        /* Applied from the UI task because esp_lcd_panel_mirror writes over
+         * the shared LCD SPI bus (also owned by this task's flush callback),
+         * and the follow-on LVGL full-screen invalidate in display_set_flipped
+         * must run in the LVGL owner thread. See display_set_flipped. */
+        ESP_LOGI(TAG, "Set display_flipped=%d", (int)evt->status);
+        display_set_flipped(evt->status != 0);
+        break;
     }
 
     _lock_release(&s_lock);

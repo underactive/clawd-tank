@@ -19,6 +19,16 @@
 
 static const char *TAG = "display";
 
+/* Panel handle hoisted to module scope so display_set_flipped() can re-apply
+ * the hardware mirror flags after init (see display_set_flipped below). Stays
+ * NULL until display_init() finishes the panel-driver setup. */
+static esp_lcd_panel_handle_t s_panel = NULL;
+
+/* LVGL display handle — set once display_init has created and registered it.
+ * Guards the runtime invalidate in display_set_flipped so the boot-time call
+ * (before lv_init) skips the LVGL side. */
+static lv_display_t *s_lv_display = NULL;
+
 // Display config
 #define LCD_HOST        SPI2_HOST
 #define LCD_H_RES       BOARD_LCD_H_RES
@@ -130,8 +140,8 @@ lv_display_t *display_init(void) {
     };
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(LCD_HOST, &io_config, &io_handle));
 
-    // Panel driver (board-selected)
-    esp_lcd_panel_handle_t panel = NULL;
+    // Panel driver (board-selected) — stored at module scope so the runtime
+    // display_set_flipped() hook can re-apply mirror flags after init.
     esp_lcd_panel_dev_config_t panel_config = {
         .reset_gpio_num = BOARD_LCD_PIN_RST,
 #if BOARD_LCD_RGB_ORDER_BGR
@@ -142,28 +152,30 @@ lv_display_t *display_init(void) {
         .bits_per_pixel = 16,
     };
 #if defined(BOARD_LCD_DRIVER_ST7789)
-    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &panel));
+    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &s_panel));
 #elif defined(BOARD_LCD_DRIVER_ILI9341)
-    ESP_ERROR_CHECK(esp_lcd_new_panel_ili9341(io_handle, &panel_config, &panel));
+    ESP_ERROR_CHECK(esp_lcd_new_panel_ili9341(io_handle, &panel_config, &s_panel));
 #else
 #  error "No LCD driver selected in board_config.h"
 #endif
 
     // Reset is a no-op when reset_gpio_num = -1 (POR-only panels)
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
+    ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
+    ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
 #if BOARD_LCD_INVERT_COLOR
-    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, true));
+    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(s_panel, true));
 #endif
 
-    // Landscape orientation — per-board flags (tune during bring-up if wrong)
-    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel, BOARD_LCD_SWAP_XY));
-    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel, BOARD_LCD_MIRROR_X, BOARD_LCD_MIRROR_Y));
+    // Landscape orientation — per-board flags (tune during bring-up if wrong).
+    // display_set_flipped(stored) below XORs the mirror flags for the user's
+    // saved 180° preference.
+    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(s_panel, BOARD_LCD_SWAP_XY));
+    display_set_flipped(config_store_get_display_flipped());
 
     // Offset in controller RAM. ST7789 + 172-row display needs y_gap=34 to
     // center the visible window; ILI9341 fills the 320x240 RAM so gap is 0.
 #if (BOARD_LCD_GAP_X != 0) || (BOARD_LCD_GAP_Y != 0)
-    ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel, BOARD_LCD_GAP_X, BOARD_LCD_GAP_Y));
+    ESP_ERROR_CHECK(esp_lcd_panel_set_gap(s_panel, BOARD_LCD_GAP_X, BOARD_LCD_GAP_Y));
 #endif
 
     // Clear screen to black before turning on backlight
@@ -173,14 +185,14 @@ lv_display_t *display_init(void) {
         configASSERT(clear_buf);
         for (int y = 0; y < LCD_V_RES; y += LVGL_BUF_LINES) {
             int h = (y + LVGL_BUF_LINES <= LCD_V_RES) ? LVGL_BUF_LINES : (LCD_V_RES - y);
-            esp_lcd_panel_draw_bitmap(panel, 0, y, LCD_H_RES, y + h, clear_buf);
+            esp_lcd_panel_draw_bitmap(s_panel, 0, y, LCD_H_RES, y + h, clear_buf);
         }
         // Wait for all queued SPI DMA transfers to complete before freeing
         vTaskDelay(pdMS_TO_TICKS(100));
         free(clear_buf);
     }
 
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
+    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_panel, true));
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, config_store_get_brightness());
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 
@@ -201,9 +213,10 @@ lv_display_t *display_init(void) {
 
     lv_display_set_buffers(display, buf1, buf2, buf_sz,
                             LV_DISPLAY_RENDER_MODE_PARTIAL);
-    lv_display_set_user_data(display, panel);
+    lv_display_set_user_data(display, s_panel);
     lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
     lv_display_set_flush_cb(display, lvgl_flush_cb);
+    s_lv_display = display;
 
     // DMA done -> flush ready callback
     const esp_lcd_panel_io_callbacks_t cbs = {
@@ -229,4 +242,36 @@ void display_set_brightness(uint8_t duty)
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
     ESP_LOGI(TAG, "Brightness set to %u", duty);
+}
+
+void display_set_flipped(bool flipped)
+{
+    if (!s_panel) return;
+
+    /* 180° rotation in landscape = XOR both mirror flags against the board's
+     * native orientation. swap_xy stays as-is (that's the portrait↔landscape
+     * axis swap which isn't what we're toggling). */
+    bool mx = BOARD_LCD_MIRROR_X ? !flipped : flipped;
+    bool my = BOARD_LCD_MIRROR_Y ? !flipped : flipped;
+    ESP_ERROR_CHECK(esp_lcd_panel_mirror(s_panel, mx, my));
+    ESP_LOGI(TAG, "Display flipped=%u (mirror_x=%u mirror_y=%u)",
+             (unsigned)flipped, (unsigned)mx, (unsigned)my);
+
+    /* Mirror flips the CASET/RASET mapping for *future* pixel writes. Anything
+     * already in panel RAM (static scene layers — sky, ground) stays put and
+     * is scanned out in its old orientation, so only dynamic/redrawn regions
+     * appear flipped until we force every widget to re-render. Invalidating
+     * the root screen marks every pixel dirty; lv_refr_now drives the full
+     * redraw synchronously so the user sees one clean transition rather than
+     * a several-frame tear while LVGL's partial-refresh chews through the
+     * screen in tiles. Only runs after LVGL is up — the boot-time init caller
+     * skips this branch because the display clear-to-black + first scene
+     * render that follow already cover the full screen in the new mapping. */
+    if (s_lv_display) {
+        lv_obj_t *scr = lv_display_get_screen_active(s_lv_display);
+        if (scr) {
+            lv_obj_invalidate(scr);
+            lv_refr_now(s_lv_display);
+        }
+    }
 }

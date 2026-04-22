@@ -104,6 +104,14 @@ class ClawdTankApp(rumps.App, DaemonObserver):
                 item.state = True
             self._session_timeout_menu.add(item)
 
+        # Display flip toggle — for users who mount the device upside-down.
+        # State is driven by the device's persisted config, not local prefs,
+        # so moving the device between Macs preserves the flip.
+        self._display_flipped_item = rumps.MenuItem(
+            "Flip Display 180°",
+            callback=self._on_toggle_display_flipped,
+        )
+
         # Claude Code hooks
         self._hooks_item = rumps.MenuItem(
             "Install Claude Code Hooks",
@@ -136,6 +144,7 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             None,
             self._brightness_item,
             self._session_timeout_menu,
+            self._display_flipped_item,
             None,
             self._hooks_item,
             self._login_item,
@@ -290,9 +299,15 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             self._session_timeout_value = timeout
             for key, item in self._session_timeout_menu.items():
                 item.state = (item._seconds == timeout)
+
+            self._display_flipped_item.state = bool(
+                self._current_config.get("display_flipped", False)
+            )
+            self._display_flipped_item.set_callback(self._on_toggle_display_flipped)
         else:
             self.icon = self._icon_path("crab-disconnected")
             self._brightness_slider.set_enabled(False)
+            self._display_flipped_item.set_callback(None)
         self.title = ""
 
     def _icon_path(self, name: str) -> Optional[str]:
@@ -333,6 +348,20 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             # Update daemon staleness timeout
             if self._daemon:
                 self._daemon.set_session_timeout(seconds)
+
+    def _on_toggle_display_flipped(self, sender):
+        """Flip the physical display 180° for upside-down mounting. Toggle
+        optimistically — the checkbox updates immediately; the BLE write may
+        still fail, in which case the next config-read (on reconnect) will
+        correct the state."""
+        new_state = not sender.state
+        sender.state = new_state
+        self._current_config["display_flipped"] = new_state
+        if self._loop and self._connected:
+            payload = json.dumps({"display_flipped": new_state})
+            asyncio.run_coroutine_threadsafe(
+                self._daemon.write_config(payload), self._loop
+            )
 
     def _on_toggle_ble_enabled(self, sender):
         """Toggle BLE transport on/off."""

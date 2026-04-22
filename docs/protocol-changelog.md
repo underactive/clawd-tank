@@ -27,6 +27,16 @@ Note: For v2 transports, `sweeping` is sent as a per-session animation in `set_s
 
 **Existing actions unchanged:** `add`, `dismiss`, `clear`, `set_time`, `set_status` all continue to work as in v1.
 
+**Config field addition: `display_flipped`** (additive, non-breaking)
+
+The config characteristic now accepts an optional boolean field `display_flipped`. When `true`, the firmware applies a 180° hardware rotation (via `esp_lcd_panel_mirror`) for users who mount the device upside-down. Persisted to NVS under the `disp_flip` key. Read-back via the config characteristic now includes the field:
+
+```json
+{"brightness":230,"sleep_timeout":300,"display_flipped":false}
+```
+
+Write payload accepts JSON `true`/`false` or the numbers `0`/`1`. Unknown config fields are ignored by the firmware (and always have been), so v1/early-v2 clients that don't send this field keep working unchanged. No GATT version bump.
+
 ## Version 1 (current)
 
 The original protocol. No version characteristic — the daemon infers v1 from its absence.

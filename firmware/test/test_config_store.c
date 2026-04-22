@@ -14,14 +14,18 @@
 
 static uint8_t  mock_brightness = 0;
 static uint16_t mock_sleep_timeout = 0;
+static uint8_t  mock_display_flipped = 0;
 static int mock_brightness_set = 0;
 static int mock_sleep_timeout_set = 0;
+static int mock_display_flipped_set = 0;
 
 static void mock_nvs_reset(void) {
     mock_brightness = 0;
     mock_sleep_timeout = 0;
+    mock_display_flipped = 0;
     mock_brightness_set = 0;
     mock_sleep_timeout_set = 0;
+    mock_display_flipped_set = 0;
 }
 
 esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *handle) {
@@ -34,6 +38,10 @@ esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *val) {
     (void)h;
     if (strcmp(key, "brightness") == 0 && mock_brightness_set) {
         *val = mock_brightness;
+        return ESP_OK;
+    }
+    if (strcmp(key, "disp_flip") == 0 && mock_display_flipped_set) {
+        *val = mock_display_flipped;
         return ESP_OK;
     }
     return ESP_ERR_NVS_NOT_FOUND;
@@ -53,6 +61,9 @@ esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t val) {
     if (strcmp(key, "brightness") == 0) {
         mock_brightness = val;
         mock_brightness_set = 1;
+    } else if (strcmp(key, "disp_flip") == 0) {
+        mock_display_flipped = val;
+        mock_display_flipped_set = 1;
     }
     return ESP_OK;
 }
@@ -114,6 +125,37 @@ static void test_set_sleep_timeout_persists(void) {
     printf("  PASS: test_set_sleep_timeout_persists\n");
 }
 
+static void test_display_flipped_default_false(void) {
+    mock_nvs_reset();
+    config_store_init();
+    assert(config_store_get_display_flipped() == false);
+    printf("  PASS: test_display_flipped_default_false\n");
+}
+
+static void test_set_display_flipped_persists(void) {
+    mock_nvs_reset();
+    config_store_init();
+    config_store_set_display_flipped(true);
+    assert(config_store_get_display_flipped() == true);
+    assert(mock_display_flipped == 1);
+    assert(mock_display_flipped_set == 1);
+
+    /* Toggling back writes 0 and clears the getter. */
+    config_store_set_display_flipped(false);
+    assert(config_store_get_display_flipped() == false);
+    assert(mock_display_flipped == 0);
+    printf("  PASS: test_set_display_flipped_persists\n");
+}
+
+static void test_display_flipped_loads_from_nvs(void) {
+    mock_nvs_reset();
+    mock_display_flipped = 1;
+    mock_display_flipped_set = 1;
+    config_store_init();
+    assert(config_store_get_display_flipped() == true);
+    printf("  PASS: test_display_flipped_loads_from_nvs\n");
+}
+
 static void test_serialize_json(void) {
     mock_nvs_reset();
     config_store_init();
@@ -128,7 +170,20 @@ static void test_serialize_json(void) {
     // Verify it contains expected fields
     assert(strstr(buf, "\"brightness\":128") != NULL);
     assert(strstr(buf, "\"sleep_timeout\":600") != NULL);
+    assert(strstr(buf, "\"display_flipped\":0") != NULL);
     printf("  PASS: test_serialize_json\n");
+}
+
+static void test_serialize_json_includes_display_flipped(void) {
+    mock_nvs_reset();
+    config_store_init();
+    config_store_set_display_flipped(true);
+
+    char buf[256];
+    uint16_t len = config_store_serialize_json(buf, sizeof(buf));
+    assert(len > 0);
+    assert(strstr(buf, "\"display_flipped\":1") != NULL);
+    printf("  PASS: test_serialize_json_includes_display_flipped\n");
 }
 
 static void test_serialize_json_default_values(void) {
@@ -166,7 +221,11 @@ int main(void) {
     test_loads_from_nvs();
     test_set_brightness_persists();
     test_set_sleep_timeout_persists();
+    test_display_flipped_default_false();
+    test_set_display_flipped_persists();
+    test_display_flipped_loads_from_nvs();
     test_serialize_json();
+    test_serialize_json_includes_display_flipped();
     test_serialize_json_default_values();
     test_serialize_json_small_buffer();
     printf("All config store tests passed!\n");
