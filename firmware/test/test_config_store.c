@@ -138,8 +138,14 @@ static void test_serialize_json_default_values(void) {
     char buf[256];
     uint16_t len = config_store_serialize_json(buf, sizeof(buf));
     assert(len > 0);
-    assert(strstr(buf, "\"brightness\":102") != NULL);
-    assert(strstr(buf, "\"sleep_timeout\":300") != NULL);
+    char expected_brightness[32];
+    snprintf(expected_brightness, sizeof(expected_brightness),
+             "\"brightness\":%d", CONFIG_DEFAULT_BRIGHTNESS);
+    char expected_timeout[32];
+    snprintf(expected_timeout, sizeof(expected_timeout),
+             "\"sleep_timeout\":%d", CONFIG_DEFAULT_SLEEP_TIMEOUT);
+    assert(strstr(buf, expected_brightness) != NULL);
+    assert(strstr(buf, expected_timeout) != NULL);
     printf("  PASS: test_serialize_json_default_values\n");
 }
 
