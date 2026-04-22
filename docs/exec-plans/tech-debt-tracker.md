@@ -22,13 +22,6 @@ Known technical debt, tracked as inventory. Items here should be addressed by ta
 - **Added:** 2026-04-21
 - **Notes:** Apple Clang on macOS 26.x (Tahoe) deadlocks inside `AsanInitFromRtl` during `libsystem_malloc`'s initializer — the ASan malloc hook re-enters `AsanInitFromRtl` through `_Block_copy → malloc`, spins on `StaticSpinMutex::LockSlow`, and never reaches `main()`. Confirmed via `sample(1)` against a running test binary. `make test` previously ran with `-fsanitize=address,undefined`; now only `-fsanitize=undefined`. UBSan still catches signed-overflow / null-deref / alignment bugs. Re-add `,address` once Apple ships a fixed asan runtime (or switch to Homebrew clang with LLVM asan, which tracks upstream more closely).
 
-### fnk0104 display orientation flags not verified on hardware
-- **Domain:** `firmware/board-port-fnk0104`
-- **Grade impact:** Prevents the port from reaching grade B until bring-up confirms
-- **Severity:** medium
-- **Added:** 2026-04-21
-- **Notes:** `BOARD_LCD_SWAP_XY`, `BOARD_LCD_MIRROR_X`, `BOARD_LCD_MIRROR_Y`, `BOARD_LCD_RGB_ORDER_BGR` in `board_config.h` are best-guess values derived from `pixel-agents-esp32` (which uses TFT_eSPI's `setRotation(1)`). ILI9341 modules vary in RGB vs BGR order and the MADCTL translation to `esp_lcd_panel_swap_xy`/`esp_lcd_panel_mirror` can be off by 180°. First flash will reveal whether the image is upside-down or has swapped red/blue; adjust macros accordingly.
-
 ### fnk0104 touch: tap anywhere = clear all, not per-card dismiss
 - **Domain:** `firmware/board-port-fnk0104`
 - **Grade impact:** UX polish, not correctness
@@ -52,7 +45,11 @@ Known technical debt, tracked as inventory. Items here should be addressed by ta
 
 ## Resolved debt
 
-(none)
+### fnk0104 display orientation flags verified on hardware
+- **Domain:** `firmware/board-port-fnk0104`
+- **Added:** 2026-04-21
+- **Resolved:** 2026-04-22
+- **Notes:** First bring-up confirmed `BOARD_LCD_SWAP_XY`, `BOARD_LCD_MIRROR_X`, `BOARD_LCD_MIRROR_Y`, and `BOARD_LCD_RGB_ORDER_BGR` as shipped in v1.5.0 produce correct landscape orientation, upright Clawd, correct RGB order (Clawd orange is orange), and tap coordinates that land in the expected hit-test regions (touch `Clear all` fires on tap). No macro changes needed. The fnk0104 port can be graded without the "provisional" asterisk.
 
 ## Process
 
