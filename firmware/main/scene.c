@@ -639,8 +639,13 @@ scene_t *scene_create(lv_obj_t *parent)
     /* Battery HUD — built unconditionally, hidden by default.
      * Anchored top-right; sits below the overflow-badge row (y=4, h=12)
      * with 2 px gap. Body: 16x8, nub: 2x4, fill: inner 14x6 scaled by pct.
-     * Leave 6 px right margin so the 2 px nub still sits on-screen. */
+     * Leave 6 px right margin so the 2 px nub still sits on-screen.
+     * On LVGL memory exhaustion any of these can return NULL — scene_set_battery
+     * skips the update in that case, but we log here so the cause is visible. */
     s->battery_body = lv_obj_create(s->container);
+#ifndef SIMULATOR
+    if (!s->battery_body) ESP_LOGE("scene", "battery_body lv_obj_create failed");
+#endif
     lv_obj_remove_style_all(s->battery_body);
     lv_obj_set_size(s->battery_body, 16, 8);
     lv_obj_align(s->battery_body, LV_ALIGN_TOP_RIGHT, -6, 20);
@@ -652,6 +657,9 @@ scene_t *scene_create(lv_obj_t *parent)
 
     /* Nub on the RIGHT side of the body — conventional battery-icon shape. */
     s->battery_nub = lv_obj_create(s->container);
+#ifndef SIMULATOR
+    if (!s->battery_nub) ESP_LOGE("scene", "battery_nub lv_obj_create failed");
+#endif
     lv_obj_remove_style_all(s->battery_nub);
     lv_obj_set_size(s->battery_nub, 2, 4);
     lv_obj_align_to(s->battery_nub, s->battery_body, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
@@ -661,6 +669,9 @@ scene_t *scene_create(lv_obj_t *parent)
     lv_obj_add_flag(s->battery_nub, LV_OBJ_FLAG_HIDDEN);
 
     s->battery_fill = lv_obj_create(s->battery_body);
+#ifndef SIMULATOR
+    if (!s->battery_fill) ESP_LOGE("scene", "battery_fill lv_obj_create failed (parent %p)", (void *)s->battery_body);
+#endif
     lv_obj_remove_style_all(s->battery_fill);
     lv_obj_set_size(s->battery_fill, 14, 6);
     lv_obj_align(s->battery_fill, LV_ALIGN_LEFT_MID, 0, 0);
@@ -901,6 +912,10 @@ void scene_update_time(scene_t *scene, int hour, int minute)
 void scene_set_battery(scene_t *scene, uint8_t pct, bool charging)
 {
     if (!scene) return;
+    /* Guard against any widget that failed to create at init time — LVGL
+     * returns NULL on allocation failure and we don't want to crash the
+     * UI tick over a missing HUD. scene_create() logs the specific failure. */
+    if (!scene->battery_body || !scene->battery_fill || !scene->battery_nub) return;
     if (pct > 100) pct = 100;
 
     /* Fill width: 14 px inner width * pct/100, min 1 px so low battery still
