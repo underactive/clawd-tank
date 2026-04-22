@@ -39,6 +39,12 @@
 #define BOARD_HAS_BATTERY      0
 #define BOARD_HAS_PSRAM        0
 
+// RGB LED GPIO is ignored by the simulator's led_strip shim (see
+// simulator/shims/led_strip.h — the shim routes colors to
+// sim_rgb_led_update() instead). Any value compiles; keep the C6 pin for
+// consistency with the default scene geometry above.
+#define BOARD_RGB_LED_GPIO     8
+
 // ============================================================================
 // Waveshare ESP32-C6-LCD-1.47
 // ============================================================================
