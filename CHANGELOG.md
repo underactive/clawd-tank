@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-04-21
+
+### Fixed
+
+- **Screen went blank after BLE connect until a Claude Code hook fired** — The daemon's post-connect sync unconditionally sent `set_status: sleeping` whenever `_session_states` was empty (fresh boot, or all sessions stale-evicted on startup), and the firmware honored it by setting the backlight to 0. The device appeared dead from the moment BLE connected until the user generated any hook event. The daemon now skips the sleep write on (re)connect when no sessions are active — the firmware's default post-connect idle scene is a better UX than a blank backlight. The staleness-checker path still commands sleep when sessions are evicted while connected, so the "sleep after inactivity" feature is preserved. The firmware also now resets its sleep state on BLE disconnect so the DISCONNECTED crab and the next reconnect's IDLE animation are always visible regardless of prior status.
+
 ## [1.5.0] - 2026-04-21
 
 ### Added

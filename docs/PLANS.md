@@ -4,7 +4,7 @@ Plans are first-class artifacts in this project. Complex, scoped, multi-session 
 
 This file also tracks the plan archive (individual plan docs in `exec-plans/completed/`), the release log — completed work grouped by version — and the list of future considerations currently out of scope.
 
-## Current status (v1.5.0)
+## Current status (v1.5.1)
 
 Firmware builds, flashes, and runs on two supported boards behind a Kconfig selector: the original Waveshare ESP32-C6-LCD-1.47 and the new Freenove ESP32-S3 2.8" (fnk0104) with ILI9341 320×240 display, FT6336G capacitive touch, 8 MB OPI PSRAM, and LiPo battery sense. BLE advertising works; notifications can be sent and dismissed via BLE GATT writes. 23 C tests pass (UBSan; ASan is disabled pending a fix to a macOS 26 toolchain deadlock), 222 Python tests pass. Clawd sprite animations and notification card UI are implemented. NVS-backed config store supports brightness and session timeout with BLE read/write. macOS menu bar app provides daemon control, device configuration UI, and simulator toggle.
 
@@ -49,6 +49,12 @@ Individual plan documents archived under [exec-plans/completed/](exec-plans/comp
 ## Completed work
 
 Grouped by release, latest first. The BLE protocol-level history lives in [protocol-changelog.md](protocol-changelog.md); this is the product-level release log. User-facing release notes for all versions (including v1.4.x, which only appears in CHANGELOG.md) live in [CHANGELOG.md](../CHANGELOG.md).
+
+### v1.5.1 — Display Blanking Hotfix
+
+- [x] **Screen stayed blank after BLE connect** — Daemon's post-connect sync unconditionally sent `set_status: sleeping` whenever `_session_states` was empty, and the firmware honored it with `display_set_brightness(0)`. The device appeared dead until a Claude Code hook event triggered a real display-state update. `_replay_active_for` now skips the sleep write on (re)connect when no sessions exist; `_broadcast_display_state_if_changed` still commands sleep when sessions are evicted by the staleness checker while connected.
+- [x] **Firmware sleep state reset on BLE disconnect** — `BLE_EVT_DISCONNECTED` now restores the backlight and resets `s_display_status = DISPLAY_STATUS_IDLE` so the DISCONNECTED crab and the next reconnect's IDLE animation are always visible, regardless of whether the device was previously in `DISPLAY_STATUS_SLEEPING`.
+- [x] **Regression test added** — `test_replay_active_empty_store_and_no_sessions_is_noop` locks in the "no sessions → no sleep write" contract. Complementary `test_replay_active_sends_status_when_sessions_exist` guards the other direction so the fix can't accidentally suppress legitimate state syncs.
 
 ### v1.5.0 — Dual-Board Support (Freenove ESP32-S3 2.8")
 
