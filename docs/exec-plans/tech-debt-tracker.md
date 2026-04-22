@@ -15,6 +15,13 @@ Known technical debt, tracked as inventory. Items here should be addressed by ta
 
 ## Active debt
 
+### firmware/test Makefile dropped ASan (macOS 26 toolchain bug)
+- **Domain:** `firmware/test`
+- **Grade impact:** Reduces runtime memory-safety coverage in host-side C tests
+- **Severity:** medium
+- **Added:** 2026-04-21
+- **Notes:** Apple Clang on macOS 26.x (Tahoe) deadlocks inside `AsanInitFromRtl` during `libsystem_malloc`'s initializer — the ASan malloc hook re-enters `AsanInitFromRtl` through `_Block_copy → malloc`, spins on `StaticSpinMutex::LockSlow`, and never reaches `main()`. Confirmed via `sample(1)` against a running test binary. `make test` previously ran with `-fsanitize=address,undefined`; now only `-fsanitize=undefined`. UBSan still catches signed-overflow / null-deref / alignment bugs. Re-add `,address` once Apple ships a fixed asan runtime (or switch to Homebrew clang with LLVM asan, which tracks upstream more closely).
+
 ### fnk0104 display orientation flags not verified on hardware
 - **Domain:** `firmware/board-port-fnk0104`
 - **Grade impact:** Prevents the port from reaching grade B until bring-up confirms
