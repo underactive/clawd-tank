@@ -1,11 +1,15 @@
 // firmware/main/ui_manager.c
 #include "ui_manager.h"
+#include "board_config.h"
 #include "scene.h"
 #include "notification_ui.h"
 #include "notification.h"
 #include "config_store.h"
 #include "display.h"
 #include "rgb_led.h"
+#if BOARD_HAS_BATTERY
+#include "battery.h"
+#endif
 #include "esp_log.h"
 #include <stdio.h>
 #include <time.h>
@@ -21,8 +25,8 @@ typedef enum {
     UI_STATE_DISCONNECTED,
 } ui_state_t;
 
-#define SCENE_FULL_WIDTH   320
-#define SCENE_NOTIF_WIDTH  107
+#define SCENE_FULL_WIDTH   BOARD_LCD_H_RES   /* full-screen crab scene */
+#define SCENE_NOTIF_WIDTH  107               /* crab shrinks to this when notif panel slides in */
 #define SCENE_ANIM_MS      400
 
 /* ---------- Module state ---------- */
@@ -321,6 +325,15 @@ void ui_manager_tick(void)
 
     /* Scene animation tick (sprite frame advance, star twinkle) */
     scene_tick(s_scene);
+
+#if BOARD_HAS_BATTERY
+    /* Battery HUD — poll() returns true only when the reading changed
+     * meaningfully, so we don't redraw every 5 ms. */
+    uint8_t bat_pct; bool bat_charging;
+    if (battery_poll(&bat_pct, &bat_charging)) {
+        scene_set_battery(s_scene, bat_pct, bat_charging);
+    }
+#endif
 
     /* Time update: check once per tick, update when minute changes */
     if (s_state != UI_STATE_NOTIFICATION && s_state != UI_STATE_DISCONNECTED) {

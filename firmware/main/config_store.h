@@ -4,7 +4,7 @@
 
 #include <stdint.h>
 
-#define CONFIG_DEFAULT_BRIGHTNESS    102
+#define CONFIG_DEFAULT_BRIGHTNESS    230  /* 90 % of 8-bit PWM duty (255) */
 #define CONFIG_DEFAULT_SLEEP_TIMEOUT 300  /* seconds */
 
 // Initialize config store — loads from NVS, or uses defaults.

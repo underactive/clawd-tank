@@ -1,32 +1,29 @@
 // firmware/main/display.c
 #include "display.h"
+#include "board_config.h"
 #include "config_store.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h"
+#if defined(BOARD_LCD_DRIVER_ILI9341)
+#include "esp_lcd_ili9341.h"
+#endif
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "driver/ledc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 static const char *TAG = "display";
 
-// Waveshare ESP32-C6-LCD-1.47 pin definitions
-#define PIN_MOSI    6
-#define PIN_SCLK    7
-#define PIN_CS      14
-#define PIN_DC      15
-#define PIN_RST     21
-#define PIN_BL      22
-
 // Display config
 #define LCD_HOST        SPI2_HOST
-#define LCD_PIXEL_CLK   (12 * 1000 * 1000)
-#define LCD_H_RES       320   // landscape width
-#define LCD_V_RES       172   // landscape height
+#define LCD_H_RES       BOARD_LCD_H_RES
+#define LCD_V_RES       BOARD_LCD_V_RES
+#define LCD_PIXEL_CLK   BOARD_LCD_PIXEL_CLK_HZ
 #define LCD_CMD_BITS    8
 #define LCD_PARAM_BITS  8
 #define LVGL_BUF_LINES  20
@@ -40,12 +37,43 @@ static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io,
     return false;
 }
 
+#if BOARD_LCD_SATURATION_BOOST_X16 != 16
+/* In-place saturation boost on a span of RGB565 pixels (native byte order,
+ * applied before the SPI byte-swap). Per pixel: split into 8-bit channels,
+ * compute Rec. 601 luma, push each channel away from luma by `boost/16`,
+ * clamp, recompress. ~15 integer ops per pixel; runs in <5 ms for a full
+ * 320x240 flush on the dual-core S3, and most flushes are partial. */
+static void saturate_rgb565_span(uint16_t *px, int n) {
+    const int boost = BOARD_LCD_SATURATION_BOOST_X16;
+    for (int i = 0; i < n; i++) {
+        uint16_t v = px[i];
+        int r = ((v >> 11) & 0x1F) << 3;  // 5 -> 8 bits
+        int g = ((v >>  5) & 0x3F) << 2;  // 6 -> 8 bits
+        int b = ( v        & 0x1F) << 3;  // 5 -> 8 bits
+        int luma = (r * 77 + g * 150 + b * 29) >> 8;  // weights sum to 256
+        r = luma + (((r - luma) * boost) >> 4);
+        g = luma + (((g - luma) * boost) >> 4);
+        b = luma + (((b - luma) * boost) >> 4);
+        if (r < 0) r = 0; else if (r > 255) r = 255;
+        if (g < 0) g = 0; else if (g > 255) g = 255;
+        if (b < 0) b = 0; else if (b > 255) b = 255;
+        px[i] = (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+    }
+}
+#endif
+
 static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area,
                            uint8_t *px_map) {
     esp_lcd_panel_handle_t panel = lv_display_get_user_data(disp);
 
     int w = area->x2 - area->x1 + 1;
     int h = area->y2 - area->y1 + 1;
+
+#if BOARD_LCD_SATURATION_BOOST_X16 != 16
+    /* Apply saturation in native RGB565 order, BEFORE the SPI byte-swap. */
+    saturate_rgb565_span((uint16_t *)px_map, w * h);
+#endif
+
     lv_draw_sw_rgb565_swap(px_map, w * h);
 
     esp_lcd_panel_draw_bitmap(panel,
@@ -69,7 +97,7 @@ lv_display_t *display_init(void) {
     };
     ESP_ERROR_CHECK(ledc_timer_config(&bl_timer));
     ledc_channel_config_t bl_channel = {
-        .gpio_num = PIN_BL,
+        .gpio_num = BOARD_LCD_PIN_BL,
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .channel = LEDC_CHANNEL_0,
         .timer_sel = LEDC_TIMER_0,
@@ -80,9 +108,9 @@ lv_display_t *display_init(void) {
 
     // SPI bus
     spi_bus_config_t buscfg = {
-        .sclk_io_num = PIN_SCLK,
-        .mosi_io_num = PIN_MOSI,
-        .miso_io_num = 5,
+        .sclk_io_num = BOARD_LCD_PIN_SCLK,
+        .mosi_io_num = BOARD_LCD_PIN_MOSI,
+        .miso_io_num = BOARD_LCD_PIN_MISO,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = LCD_H_RES * LVGL_BUF_LINES * sizeof(uint16_t),
@@ -92,8 +120,8 @@ lv_display_t *display_init(void) {
     // Panel I/O
     esp_lcd_panel_io_handle_t io_handle = NULL;
     esp_lcd_panel_io_spi_config_t io_config = {
-        .dc_gpio_num = PIN_DC,
-        .cs_gpio_num = PIN_CS,
+        .dc_gpio_num = BOARD_LCD_PIN_DC,
+        .cs_gpio_num = BOARD_LCD_PIN_CS,
         .pclk_hz = LCD_PIXEL_CLK,
         .lcd_cmd_bits = LCD_CMD_BITS,
         .lcd_param_bits = LCD_PARAM_BITS,
@@ -102,25 +130,41 @@ lv_display_t *display_init(void) {
     };
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(LCD_HOST, &io_config, &io_handle));
 
-    // ST7789 panel
+    // Panel driver (board-selected)
     esp_lcd_panel_handle_t panel = NULL;
     esp_lcd_panel_dev_config_t panel_config = {
-        .reset_gpio_num = PIN_RST,
+        .reset_gpio_num = BOARD_LCD_PIN_RST,
+#if BOARD_LCD_RGB_ORDER_BGR
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
+#else
         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+#endif
         .bits_per_pixel = 16,
     };
+#if defined(BOARD_LCD_DRIVER_ST7789)
     ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &panel));
+#elif defined(BOARD_LCD_DRIVER_ILI9341)
+    ESP_ERROR_CHECK(esp_lcd_new_panel_ili9341(io_handle, &panel_config, &panel));
+#else
+#  error "No LCD driver selected in board_config.h"
+#endif
+
+    // Reset is a no-op when reset_gpio_num = -1 (POR-only panels)
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
+#if BOARD_LCD_INVERT_COLOR
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, true));
+#endif
 
-    // Landscape: swap X/Y, then mirror as needed
-    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel, true));
-    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel, true, false));
-    // Apply offset for 172-pixel dimension (centered in 240-pixel controller RAM)
-    // With swap_xy=true, CASET addresses rows and RASET addresses columns,
-    // so the 34-pixel column offset must go on y_gap, not x_gap.
-    ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel, 0, 34));
+    // Landscape orientation — per-board flags (tune during bring-up if wrong)
+    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel, BOARD_LCD_SWAP_XY));
+    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel, BOARD_LCD_MIRROR_X, BOARD_LCD_MIRROR_Y));
+
+    // Offset in controller RAM. ST7789 + 172-row display needs y_gap=34 to
+    // center the visible window; ILI9341 fills the 320x240 RAM so gap is 0.
+#if (BOARD_LCD_GAP_X != 0) || (BOARD_LCD_GAP_Y != 0)
+    ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel, BOARD_LCD_GAP_X, BOARD_LCD_GAP_Y));
+#endif
 
     // Clear screen to black before turning on backlight
     {

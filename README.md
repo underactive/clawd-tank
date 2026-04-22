@@ -38,11 +38,28 @@ Claude Code hooks --> clawd-tank-notify --> daemon --> BLE --> ESP32-C6 display
 
 ## Hardware
 
+Two boards supported. Select at build time with `idf.py set-target esp32c6` (Waveshare) or `idf.py set-target esp32s3` (Freenove). See [`firmware/main/board_config.h`](firmware/main/board_config.h) for per-board pin maps.
+
+### Waveshare ESP32-C6-LCD-1.47 (original)
+
 - **Board**: [Waveshare ESP32-C6-LCD-1.47](https://s.click.aliexpress.com/e/_c4PGS55v)
 - **Display**: 1.47" 320x172 ST7789V (SPI), 16-bit RGB565
 - **SoC**: ESP32-C6FH8 (RISC-V, single core), 8MB flash, 512KB SRAM (no PSRAM)
 - **RGB LED**: Onboard WS2812B on GPIO8 — flashes on incoming notifications
-- **Connectivity**: BLE 5.0 (NimBLE, peripheral role)
+- **Input**: Tactile BOOT button dismisses all notifications
+
+### Freenove ESP32-S3 2.8" (fnk0104)
+
+- **Board**: Freenove FNK0104
+- **Display**: 2.8" 320x240 ILI9341 (SPI, 40 MHz), 16-bit RGB565
+- **SoC**: ESP32-S3 (dual core), 16 MB QIO-OPI flash, 8 MB OPI PSRAM
+- **RGB LED**: Onboard WS2812B on GPIO42
+- **Input**: FT6336G capacitive touch — tap anywhere dismisses notifications
+- **Battery**: LiPo with voltage-divider sensing on GPIO9; charge-level HUD shown top-right
+
+### Connectivity (both boards)
+
+- BLE 5.0 (NimBLE, peripheral role)
 
 ## Quick Start
 

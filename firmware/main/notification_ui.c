@@ -1,11 +1,12 @@
 #include "notification_ui.h"
+#include "board_config.h"
 #include <string.h>
 #include <stdio.h>
 
 /* ---------- Constants ---------- */
 
-#define SCREEN_W              320
-#define SCREEN_H              172
+#define SCREEN_W              BOARD_LCD_H_RES
+#define SCREEN_H              BOARD_LCD_V_RES
 #define COUNTER_H             20
 #define FEATURED_H            64
 #define FEATURED_H_EXPANDED   (SCREEN_H - COUNTER_H - 8)  /* fills panel on new notif */

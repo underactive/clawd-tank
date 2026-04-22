@@ -44,10 +44,20 @@ Three components: **firmware** (ESP-IDF C), **simulator** (native macOS, same C 
 
 ESP-IDF path: `bsp/esp-idf/`. Environment loaded via direnv from `firmware/.envrc`.
 
+Two boards supported — pick one with `idf.py set-target`. The matching Kconfig `CLAWD_BOARD` choice is pre-set in `sdkconfig.defaults.esp32c6` / `sdkconfig.defaults.esp32s3`, so `idf.py build` Just Works after `set-target`.
+
 ```bash
-cd firmware && idf.py build                           # Build
-cd firmware && idf.py -p /dev/ttyACM0 flash monitor   # Flash + monitor
+# Waveshare ESP32-C6-LCD-1.47 (original target)
+cd firmware && idf.py set-target esp32c6 && idf.py build
+cd firmware && idf.py -p /dev/ttyACM0 flash monitor
+
+# Freenove ESP32-S3 2.8" (fnk0104)
+cd firmware && idf.py set-target esp32s3 && idf.py build
+cd firmware && idf.py -p /dev/tty.usbmodem* flash monitor
+
+# Common
 cd firmware && idf.py fullclean                       # Clean
+cd firmware && idf.py menuconfig                      # Tweak board selector / feature flags
 ```
 
 **Do not use the bond-firmware MCP plugin — use `idf.py` directly.**

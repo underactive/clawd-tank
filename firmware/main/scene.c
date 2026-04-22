@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "board_config.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -40,7 +41,7 @@
 
 /* ---------- Constants ---------- */
 
-#define SCENE_HEIGHT       172
+#define SCENE_HEIGHT       BOARD_LCD_V_RES
 #define GRASS_HEIGHT       14
 #define STAR_COUNT         6
 #define STAR_TWINKLE_MIN   2000
@@ -277,6 +278,10 @@ static const anim_def_t anim_defs[] = {
 #define MAX_VISIBLE 4   /* max active sessions on screen (matches daemon protocol) */
 #ifdef SIMULATOR
 #define MAX_SLOTS   8   /* slot array size: active + departing (going-away animation) */
+#elif BOARD_HAS_PSRAM
+/* ESP32-S3 with 8 MB OPI PSRAM: sprite frame buffers land in PSRAM
+ * (see ensure_frame_buf). Plenty of slack for max_visible + 4 departing. */
+#define MAX_SLOTS   8
 #else
 /* ESP32-C6 has no PSRAM. With cropped sprites + RGB565A8, the largest
  * session buffer is ~50 KB (confused). 4 visible + 2 departing fits
@@ -349,6 +354,13 @@ struct scene_t {
     uint8_t hud_overflow;
     int mini_crab_frame;         /* current frame for mini-crab animation in HUD */
     uint32_t mini_crab_last_tick;
+
+    /* Battery HUD (top-right, below the overflow-badge row). Hidden by default;
+     * revealed on the first call to scene_set_battery(). Boards without a
+     * battery circuit (Waveshare C6) never call it, so the widgets stay hidden. */
+    lv_obj_t *battery_body;  /* outer outline */
+    lv_obj_t *battery_fill;  /* inner filled rect sized by percentage */
+    lv_obj_t *battery_nub;   /* tiny protrusion at the right of the body */
 };
 
 /* ---------- Helpers ---------- */
@@ -358,11 +370,30 @@ static void ensure_frame_buf(clawd_slot_t *slot, int w, int h)
 #ifdef SIMULATOR
     int needed = w * h * 4; /* ARGB8888 — simulator has plenty of memory */
 #else
-    int needed = w * h * 3; /* RGB565A8 — saves 25% on memory-constrained ESP32-C6 */
+    int needed = w * h * 3; /* RGB565A8 — saves 25 % on memory-constrained boards */
 #endif
     if (slot->frame_buf && slot->frame_buf_size >= needed) return;
+
+#ifdef SIMULATOR
     free(slot->frame_buf);
     slot->frame_buf = malloc(needed);
+#else
+    if (slot->frame_buf) heap_caps_free(slot->frame_buf);
+  #if BOARD_HAS_PSRAM
+    /* Prefer PSRAM for sprite frame buffers: they are large (up to ~50 KB),
+     * written once per frame by the CPU, and read by LVGL via lv_image_set_src
+     * which copies into the already-DMA-capable LVGL flush buffers on its own
+     * pass. Keeping sprite buffers out of internal SRAM frees ~100 KB for
+     * BLE stack, FreeRTOS, and UI widgets. */
+    slot->frame_buf = heap_caps_malloc(needed, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!slot->frame_buf) {
+        /* PSRAM pressure fallback: try internal SRAM. */
+        slot->frame_buf = heap_caps_malloc(needed, MALLOC_CAP_8BIT);
+    }
+  #else
+    slot->frame_buf = heap_caps_malloc(needed, MALLOC_CAP_8BIT);
+  #endif
+#endif
     slot->frame_buf_size = slot->frame_buf ? needed : 0;
 #ifndef SIMULATOR
     if (!slot->frame_buf) {
@@ -605,6 +636,38 @@ scene_t *scene_create(lv_obj_t *parent)
     s->mini_crab_frame = 0;
     s->mini_crab_last_tick = 0;
 
+    /* Battery HUD — built unconditionally, hidden by default.
+     * Anchored top-right; sits below the overflow-badge row (y=4, h=12)
+     * with 2 px gap. Body: 16x8, nub: 2x4, fill: inner 14x6 scaled by pct.
+     * Leave 6 px right margin so the 2 px nub still sits on-screen. */
+    s->battery_body = lv_obj_create(s->container);
+    lv_obj_remove_style_all(s->battery_body);
+    lv_obj_set_size(s->battery_body, 16, 8);
+    lv_obj_align(s->battery_body, LV_ALIGN_TOP_RIGHT, -6, 20);
+    lv_obj_set_style_border_color(s->battery_body, lv_color_hex(0xDDDDDD), 0);
+    lv_obj_set_style_border_width(s->battery_body, 1, 0);
+    lv_obj_set_style_radius(s->battery_body, 1, 0);
+    lv_obj_set_style_bg_opa(s->battery_body, LV_OPA_TRANSP, 0);
+    lv_obj_add_flag(s->battery_body, LV_OBJ_FLAG_HIDDEN);
+
+    /* Nub on the RIGHT side of the body — conventional battery-icon shape. */
+    s->battery_nub = lv_obj_create(s->container);
+    lv_obj_remove_style_all(s->battery_nub);
+    lv_obj_set_size(s->battery_nub, 2, 4);
+    lv_obj_align_to(s->battery_nub, s->battery_body, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(s->battery_nub, lv_color_hex(0xDDDDDD), 0);
+    lv_obj_set_style_bg_opa(s->battery_nub, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s->battery_nub, 0, 0);
+    lv_obj_add_flag(s->battery_nub, LV_OBJ_FLAG_HIDDEN);
+
+    s->battery_fill = lv_obj_create(s->battery_body);
+    lv_obj_remove_style_all(s->battery_fill);
+    lv_obj_set_size(s->battery_fill, 14, 6);
+    lv_obj_align(s->battery_fill, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_bg_color(s->battery_fill, lv_color_hex(0x44CC44), 0);
+    lv_obj_set_style_bg_opa(s->battery_fill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s->battery_fill, 0, 0);
+
     return s;
 }
 
@@ -833,6 +896,34 @@ void scene_update_time(scene_t *scene, int hour, int minute)
 {
     if (!scene) return;
     lv_label_set_text_fmt(scene->time_label, "%02d:%02d", hour, minute);
+}
+
+void scene_set_battery(scene_t *scene, uint8_t pct, bool charging)
+{
+    if (!scene) return;
+    if (pct > 100) pct = 100;
+
+    /* Fill width: 14 px inner width * pct/100, min 1 px so low battery still
+     * shows something. */
+    int fill_w = (14 * (int)pct + 50) / 100;
+    if (fill_w < 1 && pct > 0) fill_w = 1;
+    if (fill_w < 0) fill_w = 0;
+    lv_obj_set_width(scene->battery_fill, fill_w);
+
+    /* Color thresholds:
+     *   charging       → steady cyan regardless of pct (clear signal)
+     *   pct >= 30      → green   (healthy)
+     *   10 <= pct < 30 → amber   (warn)
+     *   pct < 10       → red     (critical) */
+    uint32_t color;
+    if (charging)      color = 0x44CCFF;
+    else if (pct >= 30) color = 0x44CC44;
+    else if (pct >= 10) color = 0xE0A020;
+    else                color = 0xE03030;
+    lv_obj_set_style_bg_color(scene->battery_fill, lv_color_hex(color), 0);
+
+    lv_obj_clear_flag(scene->battery_body, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(scene->battery_nub, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* ---------- Tick (call from UI loop) ---------- */

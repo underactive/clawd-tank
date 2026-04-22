@@ -124,15 +124,24 @@ The daemon tracks per-session state and computes display state sent to the devic
 - **Subagent tracking:** `SubagentStart` / `SubagentStop` hooks track active `agent_id`s per session. Sessions with active subagents are never evicted and count as "working" in display state. HUD overlay shows a mini-crab icon with subagent count.
 - **Session persistence:** Session state is saved atomically to `~/.clawd-tank/sessions.json` on structural state changes. The daemon loads saved state on startup with immediate stale-session eviction, so restarting the menu bar app preserves the correct display state for running Claude Code sessions.
 
+## Supported hardware
+
+Two boards are currently supported, selected at build time via the Kconfig `CLAWD_BOARD` choice and the matching `idf.py set-target`. Per-board pins, geometry, and capability flags live in `firmware/main/board_config.h`.
+
+| Board | MCU | Display | Flash | PSRAM | Touch | Battery |
+|---|---|---|---|---|---|---|
+| Waveshare ESP32-C6-LCD-1.47 | ESP32-C6FH8 (RISC-V, single-core) | ST7789, 320×172 SPI, 12 MHz | 8 MB | — | — (BOOT button dismisses) | — |
+| Freenove ESP32-S3 2.8" (fnk0104) | ESP32-S3 (dual-core) | ILI9341, 320×240 SPI, 40 MHz | 16 MB QIO-OPI | 8 MB OPI | FT6336G capacitive | Yes (ADC on GPIO 9) |
+
 ## Key constraints
 
-- **Display:** 320x172 pixels, 16-bit RGB565, SPI. All UI must fit this resolution.
-- **Target chip:** ESP32-C6FH8 (RISC-V, single core). 8 MB flash, no PSRAM. ~512 KB internal SRAM (~200 KB free heap after IDF/BLE/LVGL).
+- **Display:** Up to 320×240 pixels, 16-bit RGB565, SPI. All UI must fit the shortest supported display (172 rows on the C6 board). Layout constants come from `board_config.h`.
 - **BLE MTU:** 256 bytes. Notification JSON payloads must stay under this limit.
 - **Notification limit:** 8 simultaneous (ring buffer, oldest dropped on overflow).
 - **LVGL version:** 9.5.0 (not 8.x — API differs significantly).
-- **Sprite format:** RLE-compressed RGB565 arrays with transparency key color `0x18C5`. Auto-cropped with symmetric horizontal padding. Firmware decodes to RGB565A8 (3 bytes/pixel); simulator decodes to ARGB8888 (4 bytes/pixel). One frame buffer per active slot, lazy-allocated.
-- **RGB LED:** Onboard WS2812B on GPIO8, driven via the `espressif/led_strip` component. Flashes on notifications.
+- **Sprite format:** RLE-compressed RGB565 arrays with transparency key color `0x18C5`. Auto-cropped with symmetric horizontal padding. Firmware decodes to RGB565A8 (3 bytes/pixel); simulator decodes to ARGB8888 (4 bytes/pixel). One frame buffer per active slot, lazy-allocated — placed in PSRAM on boards that have it (fnk0104), internal SRAM otherwise.
+- **Max sessions on-screen:** `MAX_VISIBLE=4` (protocol limit, both boards). Slot array grows to 8 on PSRAM-equipped boards so walk-in/burrow animations overlap without blocking.
+- **RGB LED:** Onboard WS2812B, driven via the `espressif/led_strip` component. Flashes on notifications. Pin differs per board (C6: GPIO 8, fnk0104: GPIO 42).
 - **Time sync:** No WiFi/NTP. The host daemon sends epoch + POSIX timezone string over BLE on each connect (`set_time` action).
 
 ## Key design decisions

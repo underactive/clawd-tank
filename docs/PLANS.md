@@ -18,7 +18,7 @@ Build script (`host/build.sh`) automates simulator + py2app + bundle. Auto-updat
 
 | Plan | Goal | Owner | Started |
 |------|------|-------|---------|
-| (none) | — | — | — |
+| [fnk0104-port](exec-plans/active/2026-04-21-fnk0104-port.md) | Port firmware to Freenove ESP32-S3 2.8" alongside existing Waveshare C6 support | Claude | 2026-04-21 |
 
 See [exec-plans/active/](exec-plans/active/) for full plan documents.
 

@@ -5,11 +5,20 @@
 #include "freertos/queue.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "board_config.h"
 #include "display.h"
 #include "ble_service.h"
 #include "ui_manager.h"
 #include "config_store.h"
+#if BOARD_HAS_BOOT_BUTTON
 #include "button.h"
+#endif
+#if BOARD_HAS_TOUCH
+#include "touch.h"
+#endif
+#if BOARD_HAS_BATTERY
+#include "battery.h"
+#endif
 #include "esp_heap_caps.h"
 
 static const char *TAG = "clawd-tank";
@@ -57,8 +66,20 @@ void app_main(void) {
     // Init BLE (NimBLE GATT server, posts events to queue)
     ble_service_init(s_evt_queue);
 
-    // Init BOOT button (GPIO 0) — clears notifications on press
+#if BOARD_HAS_BOOT_BUTTON
+    // Physical BOOT button — clears notifications on press
     button_init(s_evt_queue);
+#endif
+
+#if BOARD_HAS_TOUCH
+    // Capacitive touch — any tap clears notifications
+    touch_init(s_evt_queue);
+#endif
+
+#if BOARD_HAS_BATTERY
+    // Battery ADC polling + HUD feed
+    battery_init();
+#endif
 
     // Start UI task
     BaseType_t ret = xTaskCreate(ui_task, "ui_task", 8192, NULL, 5, NULL);

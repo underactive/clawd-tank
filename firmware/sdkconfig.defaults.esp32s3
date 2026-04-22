@@ -1,0 +1,41 @@
+# firmware/sdkconfig.defaults.esp32s3
+#
+# Freenove ESP32-S3 2.8" (fnk0104):
+#   - ESP32-S3 dual-core
+#   - 16 MB QIO-OPI flash
+#   - 8 MB OPI PSRAM (80 MHz)
+#   - ILI9341 320×240 SPI display
+#   - FT6336G capacitive touch
+#   - WS2812B NeoPixel on GPIO 42
+#   - Battery sense on GPIO 9 (2× divider)
+
+# Board selector
+CONFIG_BOARD_FREENOVE_S3_28=y
+CONFIG_BOARD_WAVESHARE_C6_LCD147=n
+
+# Flash: 16 MB, Octal mode (QIO-OPI per the Freenove spec)
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_ESPTOOLPY_FLASHMODE_OPI=y
+
+# PSRAM: 8 MB Octal, 80 MHz
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+# Let both malloc() and heap_caps_malloc(..., MALLOC_CAP_SPIRAM) see PSRAM.
+# We gate MALLOC_CAP_SPIRAM explicitly at allocation sites for sprite buffers,
+# but leaving generic malloc with PSRAM-capable fallback removes a failure mode
+# when large allocations land during BLE connection setup.
+CONFIG_SPIRAM_USE_MALLOC=y
+# Internal allocator treats PSRAM as second-tier; prefer internal SRAM for small
+# allocs so BLE/FreeRTOS critical structures stay fast and DMA-capable.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# Dual-core
+# (ESP-IDF default for esp32s3 is dual-core already; being explicit guards
+# against accidental unicore carryover.)
+CONFIG_FREERTOS_UNICORE=n
+
+# USB-CDC serial console on fnk0104's native USB port
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

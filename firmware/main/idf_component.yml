@@ -2,4 +2,13 @@
 dependencies:
   lvgl/lvgl: "^9.2"
   espressif/led_strip: "^2.5"
+  # ILI9341 panel driver — used by the Freenove ESP32-S3 2.8" (fnk0104) target.
+  # Pulled in unconditionally so the component manager resolves it once; the
+  # driver itself is only referenced from display.c when BOARD_LCD_DRIVER_ILI9341
+  # is defined, and the linker drops unreferenced code.
+  espressif/esp_lcd_ili9341: "^2.0.0"
+  # FT5x06-family capacitive touch driver — used by fnk0104 (FT6336G shares the
+  # FT5x06 register layout). Same strategy as above: linker drops the dep on
+  # builds that don't reference it.
+  espressif/esp_lcd_touch_ft5x06: "^1.0.6"
   idf: ">=5.3"

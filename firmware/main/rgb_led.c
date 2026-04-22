@@ -1,5 +1,6 @@
 // firmware/main/rgb_led.c
 #include "rgb_led.h"
+#include "board_config.h"
 #include "led_strip.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -7,7 +8,7 @@
 
 static const char *TAG = "rgb_led";
 
-#define RGB_LED_GPIO    8
+#define RGB_LED_GPIO    BOARD_RGB_LED_GPIO
 #define STEP_MS         30   /* timer period */
 
 static led_strip_handle_t s_strip = NULL;

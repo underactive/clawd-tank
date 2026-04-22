@@ -1,9 +1,34 @@
 # firmware/main/Kconfig.projbuild
 menu "Clawd Configuration"
+
+    choice CLAWD_BOARD
+        prompt "Target board"
+        default BOARD_WAVESHARE_C6_LCD147
+        help
+            Selects the physical hardware target.
+
+            The Waveshare board is the original (and only pre-v1.4) target:
+            ESP32-C6 + 320x172 ST7789 SPI display, no PSRAM, 8 MB flash.
+
+            The Freenove board (fnk0104) is the second supported target:
+            ESP32-S3 + 320x240 ILI9341 SPI display, FT6336G capacitive touch,
+            8 MB OPI PSRAM, 16 MB flash, battery sense on GPIO 9.
+
+        config BOARD_WAVESHARE_C6_LCD147
+            bool "Waveshare ESP32-C6-LCD-1.47"
+            depends on IDF_TARGET_ESP32C6
+
+        config BOARD_FREENOVE_S3_28
+            bool "Freenove ESP32-S3 2.8\" (fnk0104)"
+            depends on IDF_TARGET_ESP32S3
+
+    endchoice
+
     config CLAWD_WIFI_ENABLED
         bool "Enable WiFi (debug/setup)"
         default n
         help
             Enable WiFi for OTA updates and debug logging.
             Not needed for normal BLE notification operation.
+
 endmenu

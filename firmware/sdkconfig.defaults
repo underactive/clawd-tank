@@ -1,4 +1,11 @@
 # firmware/sdkconfig.defaults
+#
+# Board-agnostic settings. Per-target overlays live in:
+#   - sdkconfig.defaults.esp32c6  (Waveshare ESP32-C6-LCD-1.47)
+#   - sdkconfig.defaults.esp32s3  (Freenove ESP32-S3 2.8", fnk0104)
+#
+# ESP-IDF applies sdkconfig.defaults first, then sdkconfig.defaults.<target>
+# on top. Settings below apply to every supported board.
 
 # BLE (NimBLE)
 CONFIG_BT_ENABLED=y
@@ -16,10 +23,6 @@ CONFIG_LCD_HOST_SPI2=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# Flash (ESP32-C6FH8 has 8MB embedded flash)
-CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
-CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
-
 # LVGL
 CONFIG_LV_COLOR_DEPTH_16=y
 CONFIG_LV_FONT_MONTSERRAT_8=y
@@ -30,3 +33,6 @@ CONFIG_LV_FONT_MONTSERRAT_18=y
 
 # FreeRTOS
 CONFIG_FREERTOS_HZ=1000
+
+# Board selector (default; overridden per-target to point at the right board)
+CONFIG_BOARD_WAVESHARE_C6_LCD147=y

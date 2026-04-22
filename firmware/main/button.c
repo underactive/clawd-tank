@@ -1,11 +1,15 @@
 // firmware/main/button.c
 #include "button.h"
+#include "board_config.h"
+
+#if BOARD_HAS_BOOT_BUTTON
+
 #include "ble_service.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 
-#define BUTTON_GPIO     GPIO_NUM_9  /* BOOT button on ESP32-C6 */
+#define BUTTON_GPIO     BOARD_BOOT_BUTTON_GPIO
 #define DEBOUNCE_US     200000  /* 200ms debounce */
 
 static const char *TAG = "button";
@@ -42,3 +46,15 @@ void button_init(QueueHandle_t evt_queue)
 
     ESP_LOGI(TAG, "GPIO %d button initialized (clear notifications)", BUTTON_GPIO);
 }
+
+#else  /* !BOARD_HAS_BOOT_BUTTON */
+
+/* This board has no physical BOOT button — dismissal goes through touch or BLE.
+ * Compile an empty stub so main.c can still call button_init() unconditionally
+ * if desired. Currently main.c guards on BOARD_HAS_BOOT_BUTTON too. */
+void button_init(QueueHandle_t evt_queue)
+{
+    (void)evt_queue;
+}
+
+#endif  /* BOARD_HAS_BOOT_BUTTON */
