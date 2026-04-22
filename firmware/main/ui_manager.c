@@ -199,6 +199,16 @@ void ui_manager_handle_event(const ble_evt_t *evt)
         ESP_LOGI(TAG, "Disconnected");
         s_connected = false;
         notif_store_clear(&s_store);
+        /* Reset sleep state on disconnect so the DISCONNECTED crab is
+         * always visible and the next reconnect starts from a clean
+         * IDLE baseline. Without this, a prior set_status:sleeping
+         * leaves backlight=0 and s_display_status=SLEEPING, making
+         * both the disconnected scene and the next connected idle
+         * animation invisible until a hook event flips status. */
+        if (s_display_status == DISPLAY_STATUS_SLEEPING) {
+            display_set_brightness(config_store_get_brightness());
+        }
+        s_display_status = DISPLAY_STATUS_IDLE;
         transition_to(UI_STATE_DISCONNECTED);
         break;
 

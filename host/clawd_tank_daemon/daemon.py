@@ -460,9 +460,14 @@ class ClawdDaemon:
             await transport.write_notification(payload)
             await asyncio.sleep(0.05)
 
-        # Send current display state
+        # Send current display state. Skip on (re)connect when no sessions
+        # are active — the firmware's default post-connect idle scene is a
+        # better UX than blanking the backlight. _broadcast_display_state_if_changed
+        # will command sleep later if sessions are evicted while connected.
         state = self._compute_display_state()
         self._last_display_state = state
+        if not self._session_states:
+            return
         version = self._transport_versions.get(name, 1)
         if version >= 2:
             status_payload = display_state_to_ble_payload(state)
