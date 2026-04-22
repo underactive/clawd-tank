@@ -4,9 +4,9 @@ Plans are first-class artifacts in this project. Complex, scoped, multi-session 
 
 This file also tracks the plan archive (individual plan docs in `exec-plans/completed/`), the release log — completed work grouped by version — and the list of future considerations currently out of scope.
 
-## Current status (v1.4.0)
+## Current status (v1.5.0)
 
-Firmware builds, flashes, and runs on the Waveshare ESP32-C6-LCD-1.47 board. BLE advertising works; notifications can be sent and dismissed via BLE GATT writes. 23 C tests pass (with ASan+UBSan), 220 Python tests pass (14 test files). Clawd sprite animations and notification card UI are implemented. NVS-backed config store supports brightness and session timeout with BLE read/write. macOS menu bar app provides daemon control, device configuration UI, and simulator toggle.
+Firmware builds, flashes, and runs on two supported boards behind a Kconfig selector: the original Waveshare ESP32-C6-LCD-1.47 and the new Freenove ESP32-S3 2.8" (fnk0104) with ILI9341 320×240 display, FT6336G capacitive touch, 8 MB OPI PSRAM, and LiPo battery sense. BLE advertising works; notifications can be sent and dismissed via BLE GATT writes. 23 C tests pass (UBSan; ASan is disabled pending a fix to a macOS 26 toolchain deadlock), 222 Python tests pass. Clawd sprite animations and notification card UI are implemented. NVS-backed config store supports brightness and session timeout with BLE read/write. macOS menu bar app provides daemon control, device configuration UI, and simulator toggle.
 
 Daemon supports multi-transport (BLE + TCP simulator) with dynamic add/remove at runtime. Simulator supports TCP listener (`--listen`) for daemon-driven operation without hardware. Tool-aware working animations — 6 distinct Clawd animations based on Claude Code tool type. 18 animated sprites integrated into `scene.c`, auto-cropped to tight bounding boxes. Multi-session display with up to 4 concurrent Clawd sprites (v2 protocol).
 
@@ -16,9 +16,7 @@ Build script (`host/build.sh`) automates simulator + py2app + bundle. Auto-updat
 
 ## Active plans
 
-| Plan | Goal | Owner | Started |
-|------|------|-------|---------|
-| [fnk0104-port](exec-plans/active/2026-04-21-fnk0104-port.md) | Port firmware to Freenove ESP32-S3 2.8" alongside existing Waveshare C6 support | Claude | 2026-04-21 |
+_No active plans._
 
 See [exec-plans/active/](exec-plans/active/) for full plan documents.
 
@@ -46,10 +44,32 @@ Individual plan documents archived under [exec-plans/completed/](exec-plans/comp
 | 2026-03-17 | [stopfailure-hook](exec-plans/completed/2026-03-17-stopfailure-hook.md)                                      | DIZZY animation + error notification card + triple red LED flash when a session hits an API error via `StopFailure`.                  |
 | 2026-03-18 | [scene-slot-lifecycle-fixes](exec-plans/completed/2026-03-18-scene-slot-lifecycle-fixes.md)                  | Fix three multi-slot rendering edge cases: narrow mode scenery, disconnect extra Clawds, connect slot adoption.                       |
 | 2026-03-19 | [tool-aware-animations](exec-plans/completed/2026-03-19-tool-aware-animations.md)                            | Distinct Clawd animations per Claude Code tool (Read→debugger, Bash→building, Edit→typing, WebSearch→wizard, Agent→conducting, …).    |
+| 2026-04-21 | [fnk0104-port](exec-plans/completed/2026-04-21-fnk0104-port.md)                                              | Port firmware to Freenove ESP32-S3 2.8" (ILI9341, FT6336G touch, PSRAM, battery ADC) alongside existing Waveshare C6 support.         |
 
 ## Completed work
 
-Grouped by release, latest first. The BLE protocol-level history lives in [protocol-changelog.md](protocol-changelog.md); this is the product-level release log.
+Grouped by release, latest first. The BLE protocol-level history lives in [protocol-changelog.md](protocol-changelog.md); this is the product-level release log. User-facing release notes for all versions (including v1.4.x, which only appears in CHANGELOG.md) live in [CHANGELOG.md](../CHANGELOG.md).
+
+### v1.5.0 — Dual-Board Support (Freenove ESP32-S3 2.8")
+
+**Second Supported Board: fnk0104**
+
+- [x] **Kconfig board selector** — `choice CLAWD_BOARD` with `BOARD_WAVESHARE_C6_LCD147` (default) and `BOARD_FREENOVE_S3_28`. Per-target `sdkconfig.defaults.esp32c6` / `sdkconfig.defaults.esp32s3` overlays handle MCU-specific PSRAM, flash mode, and FreeRTOS config. `idf.py set-target` + `idf.py build` works on both.
+- [x] **Central `board_config.h`** — All pins, panel geometry, and capability flags consolidated behind per-board `#ifdef` blocks. Adding future boards is a single additional `#ifdef` block.
+- [x] **ILI9341 panel driver** — `espressif/esp_lcd_ili9341` managed component wired into `display.c`, 320×240 landscape layout, BGR element order (confirmed at bring-up). Gap-set call skipped when `BOARD_LCD_GAP_Y==0`.
+- [x] **IPS saturation boost** — ~1.6× fixed-point saturation boost in the LVGL flush callback to match the punch of the original ST7789 TN panel. Gated to fnk0104; zero cost on the C6.
+- [x] **FT6336G capacitive touch** — `esp_lcd_touch_ft5x06` managed component + new `touch.c/h`. I2C init, INT ISR, landscape coordinate transform, tap dismisses notifications (parity with the C6 BOOT button).
+- [x] **Battery ADC + HUD** — New `battery.c/h` with ADC oneshot on GPIO 9, 2× voltage divider, `adc_cali_curve_fitting` calibration, EMA smoothing (α=0.15). `scene_set_battery(pct, charging)` renders a small battery glyph top-right. Simulator stub returns 75%.
+- [x] **PSRAM sprite buffers + `MAX_SLOTS=8`** — On fnk0104 only, sprite frame buffers allocate via `heap_caps_malloc(MALLOC_CAP_SPIRAM)`; LVGL flush buffers stay in internal DMA SRAM. Slot array grows to 8 so walk-in / burrow animations overlap without blocking.
+- [x] **WS2812B RGB LED on GPIO 42** — Pin relocation from C6's GPIO 8, driven through the same `espressif/led_strip` component.
+- [x] **Default backlight raised to 90%** — `CONFIG_DEFAULT_BRIGHTNESS` bumped from 102 to 230 to fit the IPS panel's wider dynamic range.
+
+**Phase 9 Verification Hardening**
+
+- [x] **Simulator static build restored** — `BOARD_RGB_LED_GPIO` added to the `SIMULATOR` block of `board_config.h`. The `.app` bundle's static simulator now builds clean again.
+- [x] **Host `.app` build deps pinned** — `setuptools>=68` and `py2app>=0.28` added to `requirements-dev.txt`; Python ≥3.12 venvs no longer ship setuptools by default, and `setup_requires` is a no-op on modern setuptools.
+- [x] **Stale test assertion fixed** — `test_serialize_json_default_values` now sources its expected values from `CONFIG_DEFAULT_*` macros instead of hard-coding `brightness:102`.
+- [x] **ASan disabled on macOS 26** — `firmware/test/Makefile` dropped `-fsanitize=address` after confirming Apple Clang on macOS 26 deadlocks inside `AsanInitFromRtl` during `libsystem_malloc`'s init (re-entrant spin on `StaticSpinMutex::LockSlow`). UBSan retained; situation logged in `tech-debt-tracker.md`.
 
 ### v1.3.0 — Multi-Session Display & Firmware Memory Optimization
 

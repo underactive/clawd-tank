@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-04-21
+
+### Added
+
+- **Freenove ESP32-S3 2.8" (fnk0104) support** — Second supported board alongside the original Waveshare ESP32-C6-LCD-1.47. Both coexist in one source tree behind a Kconfig selector (`CLAWD_BOARD`) with per-target `sdkconfig.defaults` overlays. Select your board with `idf.py set-target esp32c6` or `idf.py set-target esp32s3` before building.
+- **ILI9341 320×240 panel driver** — `espressif/esp_lcd_ili9341` managed component integrated into `display.c`, landscape layout, BGR element order. Larger display surface than the C6's 320×172.
+- **FT6336G capacitive touch** — Tap the display to dismiss all notifications (parity with the C6 BOOT button). Driven by `esp_lcd_touch_ft5x06`.
+- **Battery ADC + HUD icon** — LiPo voltage sensed on GPIO 9 via a 2× divider with curve-fit calibration and EMA smoothing. Small battery glyph rendered top-right of the scene.
+- **IPS saturation boost** — ~1.6× fixed-point saturation applied per-pixel in the LVGL flush callback, tuned for the fnk0104's IPS panel so Clawd's orange doesn't look muted next to the original TN panel. Zero cost on the C6 build path.
+- **PSRAM-backed sprite buffers** — On fnk0104, sprite frame buffers allocate from the 8 MB OPI PSRAM via `MALLOC_CAP_SPIRAM`; LVGL flush buffers stay in internal DMA SRAM. `MAX_SLOTS` bumped to 8 for smoother walk-in / burrow overlap.
+- **Central `board_config.h`** — All pins, panel geometry, and capability flags live in one file behind per-board `#ifdef` blocks. Adding a new board is a single additional block.
+
+### Changed
+
+- **Default backlight raised to 90 %** — `CONFIG_DEFAULT_BRIGHTNESS` increased from 102/255 (~40 %) to 230/255 (~90 %) to fit the IPS panel's wider dynamic range. Visible on both boards on next factory-reset; existing devices keep their user-chosen brightness.
+- **WS2812B RGB LED pin** — GPIO 8 on C6, GPIO 42 on fnk0104. Wiring only; protocol and flash behavior unchanged.
+- **`firmware/test/Makefile` dropped ASan** — Apple Clang on macOS 26.x deadlocks inside `AsanInitFromRtl` before `main()` runs; UBSan is unaffected and retained. Re-add `-fsanitize=address` when a fixed asan runtime ships. Tracked in `docs/exec-plans/tech-debt-tracker.md`.
+
+### Fixed
+
+- **Simulator static build broken on ASan regression** — `board_config.h`'s `SIMULATOR` block was missing `BOARD_RGB_LED_GPIO`, which the shared `rgb_led.c` needs to compile. The simulator's `led_strip` shim already ignored the pin value; this restores the build.
+- **Stale firmware test assertion** — `test_serialize_json_default_values` now sources the expected brightness and sleep-timeout defaults from `CONFIG_DEFAULT_*` macros rather than hard-coding the pre-v1.5.0 values.
+- **Host `.app` build failed on fresh Python ≥3.12 venvs** — `requirements-dev.txt` now pins `setuptools>=68` and `py2app>=0.28` so the documented bootstrap command (`python -m venv .venv && pip install -r requirements-dev.txt`) is sufficient to run `./build.sh`. The previous flow relied on `setup.py`'s legacy `setup_requires`, which is a no-op on modern setuptools.
+
 ## [1.4.1] - 2026-04-16
 
 ### Fixed

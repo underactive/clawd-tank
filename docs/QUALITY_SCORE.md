@@ -21,7 +21,7 @@ Tracks the current quality grade of each domain and architectural layer. Updated
 | `firmware/scene`    | —     | Ungraded                                             | —             |
 | `firmware/notif`    | —     | Ungraded — has C unit tests under `firmware/test/`   | —             |
 | `firmware/platform` | —     | Ungraded                                             | —             |
-| `firmware/board-port-fnk0104` | C     | Code-complete for ESP32-S3 / fnk0104. Display orientation flags and RGB/BGR element order are bring-up TODOs until verified on hardware. ILI9341 driver, FT6336G touch, battery ADC + HUD, PSRAM sprite buffers wired in behind Kconfig guards. C6 build path unchanged. | 2026-04-21    |
+| `firmware/board-port-fnk0104` | C     | Ported and verified: both `esp32c6` and `esp32s3` targets build clean, 23 firmware C tests pass under UBSan, 222 host pytest tests pass. BGR element order confirmed at bring-up. ILI9341 driver, FT6336G touch, battery ADC + HUD, PSRAM sprite buffers wired in behind Kconfig guards. Orientation flags (`swap_xy`, `mirror_x`, `mirror_y`), per-card touch dismiss, and 240-row star distribution are still open follow-ups in `tech-debt-tracker.md` — holds grade at C until those are cleared on hardware. | 2026-04-21    |
 | `simulator`         | —     | Ungraded                                             | —             |
 | `host/notify`       | —     | Ungraded — stdlib-only hook handler                  | —             |
 | `host/daemon`       | —     | Ungraded — has pytest suite under `host/tests/`      | —             |
