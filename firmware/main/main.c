@@ -16,6 +16,9 @@
 #if BOARD_HAS_TOUCH
 #include "touch.h"
 #endif
+#if BOARD_HAS_AUDIO
+#include "sound.h"
+#endif
 #include "esp_heap_caps.h"
 
 static const char *TAG = "clawd-tank";
@@ -69,8 +72,15 @@ void app_main(void) {
 #endif
 
 #if BOARD_HAS_TOUCH
-    // Capacitive touch — any tap clears notifications
+    // Capacitive touch — any tap clears notifications.
+    // Also the first user of the shared I2C master bus; sound_init() piggybacks
+    // on that bus for the ES8311 codec below.
     touch_init(s_evt_queue);
+#endif
+
+#if BOARD_HAS_AUDIO
+    // Speaker playback via ES8311 codec — one-shots tied to UI anim transitions
+    sound_init();
 #endif
 
     // Start UI task

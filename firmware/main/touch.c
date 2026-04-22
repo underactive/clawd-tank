@@ -19,6 +19,7 @@
 #if BOARD_HAS_TOUCH
 
 #include "ble_service.h"
+#include "i2c_bus.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/i2c_master.h"
@@ -71,18 +72,12 @@ void touch_init(QueueHandle_t evt_queue)
     s_last_press_us = 0;
     s_was_touching = false;
 
-    /* I2C master bus — shared with potential future I2C peripherals
-     * (ES8311 codec on a hypothetical audio-enabled fnk0104 config) */
-    i2c_master_bus_config_t bus_cfg = {
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .i2c_port = 0,
-        .scl_io_num = BOARD_TOUCH_I2C_SCL,
-        .sda_io_num = BOARD_TOUCH_I2C_SDA,
-        .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
-    };
-    i2c_master_bus_handle_t bus;
-    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &bus));
+    /* Shared I2C master bus — also used by the ES8311 codec (sound.c). */
+    i2c_master_bus_handle_t bus = i2c_bus_get();
+    if (!bus) {
+        ESP_LOGE(TAG, "Failed to acquire shared I2C bus");
+        return;
+    }
 
     /* LCD panel IO (I2C) — the esp_lcd abstraction over the FT5x06 register
      * protocol. The ESP_LCD_TOUCH_IO_I2C_FT5x06_CONFIG macro supplies the
@@ -120,7 +115,7 @@ void touch_init(QueueHandle_t evt_queue)
     }
 
     ESP_LOGI(TAG, "FT6336G touch initialized (I2C SDA=%d SCL=%d, addr=0x%02x)",
-             BOARD_TOUCH_I2C_SDA, BOARD_TOUCH_I2C_SCL, BOARD_TOUCH_I2C_ADDR);
+             BOARD_I2C_SDA, BOARD_I2C_SCL, BOARD_TOUCH_I2C_ADDR);
 }
 
 #else  /* !BOARD_HAS_TOUCH */

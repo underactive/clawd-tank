@@ -7,6 +7,9 @@
 #include "config_store.h"
 #include "display.h"
 #include "rgb_led.h"
+#if BOARD_HAS_AUDIO
+#include "sound.h"
+#endif
 #include "esp_log.h"
 #include <stdio.h>
 #include <time.h>
@@ -74,6 +77,41 @@ static void scene_animate_width(int target_px, int anim_ms)
     if (s_notif_ui) {
         notification_ui_set_x(s_notif_ui, target_px);
     }
+}
+
+/* Edge-triggered sound trigger: fires sound_play only on transitions INTO
+ * an animation that has an associated sound. Holding the same animation
+ * across multiple set_sessions updates won't retrigger.
+ * Call this anywhere the "primary visible anim" is about to change —
+ * currently set_sessions (anims[0]) and set_status (via status_to_anim).
+ * No-op on builds without audio. */
+static clawd_anim_id_t s_last_primary_anim = CLAWD_ANIM_IDLE;
+
+#if BOARD_HAS_AUDIO
+static const struct {
+    clawd_anim_id_t anim;
+    sound_id_t      sound;
+} s_anim_sound_map[] = {
+    { CLAWD_ANIM_TYPING,   SOUND_KEYBOARD_TYPE },
+    { CLAWD_ANIM_BUILDING, SOUND_BUILDING },
+    { CLAWD_ANIM_THINKING, SOUND_THINKING },
+    { CLAWD_ANIM_DEBUGGER, SOUND_DEBUGGER },
+};
+#endif
+
+static void maybe_trigger_anim_sound(clawd_anim_id_t new_anim)
+{
+#if BOARD_HAS_AUDIO
+    if (new_anim != s_last_primary_anim) {
+        for (size_t i = 0; i < sizeof(s_anim_sound_map)/sizeof(*s_anim_sound_map); i++) {
+            if (new_anim == s_anim_sound_map[i].anim) {
+                sound_play(s_anim_sound_map[i].sound);
+                break;
+            }
+        }
+    }
+#endif
+    s_last_primary_anim = new_anim;
 }
 
 static clawd_anim_id_t status_to_anim(display_status_t status) {
@@ -221,6 +259,12 @@ void ui_manager_handle_event(const ble_evt_t *evt)
         } else {
             rgb_led_flash(255, 140, 30, 800);
         }
+#if BOARD_HAS_AUDIO
+        /* Click sound — same trigger point as the RGB flash. Edge-gated by
+         * sound_play's in-flight check, so a rapid burst of notifications
+         * merges to a single click. */
+        sound_play(SOUND_NOTIFICATION_CLICK);
+#endif
 
         if (s_state != UI_STATE_NOTIFICATION) {
             transition_to(UI_STATE_NOTIFICATION);
@@ -274,6 +318,11 @@ void ui_manager_handle_event(const ble_evt_t *evt)
             evt->session_anims, evt->session_ids,
             evt->session_anim_count, evt->subagent_count, evt->session_overflow);
 
+        /* Audio trigger: fires when slot 0 transitions INTO typing. */
+        if (evt->session_anim_count > 0) {
+            maybe_trigger_anim_sound((clawd_anim_id_t)evt->session_anims[0]);
+        }
+
         s_last_activity_tick = lv_tick_get();
         break;
     }
@@ -286,6 +335,7 @@ void ui_manager_handle_event(const ble_evt_t *evt)
 
         clawd_anim_id_t anim = status_to_anim(new_status);
         scene_set_fallback_anim(s_scene, anim);
+        maybe_trigger_anim_sound(anim);
 
         // Sleep blanking disabled — daemon set_status:sleeping no longer drops the backlight.
         // if (new_status == DISPLAY_STATUS_SLEEPING && old_status != DISPLAY_STATUS_SLEEPING) {
@@ -332,6 +382,11 @@ void ui_manager_tick(void)
 
     /* Scene animation tick (sprite frame advance, star twinkle) */
     scene_tick(s_scene);
+
+#if BOARD_HAS_AUDIO
+    /* Stream queued PCM to I2S — cheap no-op while idle. */
+    sound_update();
+#endif
 
     /* Time update: check once per tick, update when minute changes */
     if (s_state != UI_STATE_NOTIFICATION && s_state != UI_STATE_DISCONNECTED) {

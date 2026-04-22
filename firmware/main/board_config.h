@@ -37,6 +37,8 @@
 #define BOARD_HAS_BOOT_BUTTON  0
 #define BOARD_HAS_TOUCH        0
 #define BOARD_HAS_PSRAM        0
+#define BOARD_HAS_I2C_BUS      0
+#define BOARD_HAS_AUDIO        0
 
 // RGB LED GPIO is ignored by the simulator's led_strip shim (see
 // simulator/shims/led_strip.h — the shim routes colors to
@@ -81,6 +83,8 @@
 // --- Capability flags (what this board lacks)
 #define BOARD_HAS_TOUCH     0
 #define BOARD_HAS_PSRAM     0
+#define BOARD_HAS_I2C_BUS   0
+#define BOARD_HAS_AUDIO     0
 
 // ============================================================================
 // Freenove ESP32-S3 2.8" (fnk0104)
@@ -129,15 +133,32 @@
 // --- User input (no BOOT button exposed; dismiss via capacitive touch)
 #define BOARD_HAS_BOOT_BUTTON   0
 
-// --- Capacitive touch (FT6336G, I2C, FT5x06-family protocol)
+// --- Shared I2C master bus (touch + audio codec)
+#define BOARD_HAS_I2C_BUS       1
+#define BOARD_I2C_SDA           16
+#define BOARD_I2C_SCL           15
+
+// --- Capacitive touch (FT6336G, FT5x06-family protocol, on the shared I2C bus)
 #define BOARD_HAS_TOUCH         1
-#define BOARD_TOUCH_I2C_SDA     16
-#define BOARD_TOUCH_I2C_SCL     15
 #define BOARD_TOUCH_INT_GPIO    21
 #define BOARD_TOUCH_RST_GPIO    -1
 #define BOARD_TOUCH_I2C_ADDR    0x38
 #define BOARD_TOUCH_NATIVE_W    240   // raw panel reports portrait coordinates
 #define BOARD_TOUCH_NATIVE_H    320
+
+// --- Audio (ES8311 codec + speaker amp on I2S, same bus as touch)
+// Wake-word / mic are unused here — TX-only (playback) configuration.
+#define BOARD_HAS_AUDIO             1
+#define BOARD_AUDIO_I2S_MCK         4
+#define BOARD_AUDIO_I2S_BCK         5
+#define BOARD_AUDIO_I2S_WS          7
+#define BOARD_AUDIO_I2S_DOUT        8
+#define BOARD_AUDIO_AMP_ENABLE_GPIO 1       // active-low (AP_ENABLE): drive LOW to unmute
+#define BOARD_AUDIO_AMP_ACTIVE_LOW  1
+#define BOARD_AUDIO_CODEC_I2C_ADDR  0x18    // ES8311 with CE tied low
+#define BOARD_AUDIO_SAMPLE_RATE     24000
+#define BOARD_AUDIO_MCLK_MULT       256
+#define BOARD_AUDIO_VOLUME_PCT      60
 
 // --- Memory
 #define BOARD_HAS_PSRAM   1
