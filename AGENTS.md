@@ -108,7 +108,8 @@ cd firmware/test && make test                              # C unit tests (notif
 cd host && .venv/bin/pytest -v                             # Host Python tests
 cd host && .venv/bin/pytest tests/test_protocol.py -v      # Single test
 
-# Bootstrap host venv
+# Bootstrap host venv (Python >=3.12 venvs no longer include setuptools;
+# requirements-dev.txt installs it explicitly alongside py2app)
 cd host && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 ```
 

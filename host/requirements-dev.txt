@@ -1,3 +1,9 @@
 -r requirements.txt
 pytest>=7.0
 pytest-asyncio>=0.21
+
+# Required by host/build.sh (py2app + its setuptools backend). Python >=3.12
+# venvs no longer ship setuptools by default, and setup.py's legacy
+# setup_requires=["py2app"] is a no-op on modern setuptools.
+setuptools>=68
+py2app>=0.28
