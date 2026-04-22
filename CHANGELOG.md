@@ -2,11 +2,12 @@
 
 ## [Unreleased]
 
-## [1.5.1] - 2026-04-21
+## [1.5.1] - 2026-04-22
 
 ### Fixed
 
 - **Screen went blank after BLE connect until a Claude Code hook fired** — The daemon's post-connect sync unconditionally sent `set_status: sleeping` whenever `_session_states` was empty (fresh boot, or all sessions stale-evicted on startup), and the firmware honored it by setting the backlight to 0. The device appeared dead from the moment BLE connected until the user generated any hook event. The daemon now skips the sleep write on (re)connect when no sessions are active — the firmware's default post-connect idle scene is a better UX than a blank backlight. The staleness-checker path still commands sleep when sessions are evicted while connected, so the "sleep after inactivity" feature is preserved. The firmware also now resets its sleep state on BLE disconnect so the DISCONNECTED crab and the next reconnect's IDLE animation are always visible regardless of prior status.
+- **Guru Meditation crash in `scene_set_battery`** — On fnk0104, a latent NULL-pointer dereference could fault `lv_obj_set_width(scene->battery_fill, ...)` when a v1 `set_status:sleeping` was followed shortly by a brightness config-update write. The crash signature was `EXCVADDR:0x00000078` (LVGL's `obj->styles` field at offset 0x78 of a NULL `lv_obj_t *`). `scene_set_battery` now early-returns if any of the three battery HUD widgets are NULL, and `scene_create` logs `ESP_LOGE` on each `lv_obj_create` that fails so future occurrences produce a diagnostic. Confirmed on hardware that widget creation succeeds at init on the fnk0104 — the invalidation is a runtime path, not LVGL out-of-memory.
 
 ## [1.5.0] - 2026-04-21
 

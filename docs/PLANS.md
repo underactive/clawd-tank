@@ -50,11 +50,18 @@ Individual plan documents archived under [exec-plans/completed/](exec-plans/comp
 
 Grouped by release, latest first. The BLE protocol-level history lives in [protocol-changelog.md](protocol-changelog.md); this is the product-level release log. User-facing release notes for all versions (including v1.4.x, which only appears in CHANGELOG.md) live in [CHANGELOG.md](../CHANGELOG.md).
 
-### v1.5.1 — Display Blanking Hotfix
+### v1.5.1 — Display Blanking Hotfix + fnk0104 Verification
+
+**Display blanking on connect**
 
 - [x] **Screen stayed blank after BLE connect** — Daemon's post-connect sync unconditionally sent `set_status: sleeping` whenever `_session_states` was empty, and the firmware honored it with `display_set_brightness(0)`. The device appeared dead until a Claude Code hook event triggered a real display-state update. `_replay_active_for` now skips the sleep write on (re)connect when no sessions exist; `_broadcast_display_state_if_changed` still commands sleep when sessions are evicted by the staleness checker while connected.
 - [x] **Firmware sleep state reset on BLE disconnect** — `BLE_EVT_DISCONNECTED` now restores the backlight and resets `s_display_status = DISPLAY_STATUS_IDLE` so the DISCONNECTED crab and the next reconnect's IDLE animation are always visible, regardless of whether the device was previously in `DISPLAY_STATUS_SLEEPING`.
 - [x] **Regression test added** — `test_replay_active_empty_store_and_no_sessions_is_noop` locks in the "no sessions → no sleep write" contract. Complementary `test_replay_active_sends_status_when_sessions_exist` guards the other direction so the fix can't accidentally suppress legitimate state syncs.
+
+**fnk0104 bring-up verification and battery HUD safety**
+
+- [x] **fnk0104 display orientation verified on hardware** — `BOARD_LCD_SWAP_XY`, `BOARD_LCD_MIRROR_X`, `BOARD_LCD_MIRROR_Y`, and `BOARD_LCD_RGB_ORDER_BGR` as shipped in v1.5.0 produce correct landscape layout, upright Clawd, correct RGB order, and tap-hit-test behavior on the Freenove board. Closed the "orientation flags not verified" tech-debt entry. Port graded without the "provisional" asterisk.
+- [x] **`scene_set_battery` hardened against NULL widgets** — A Guru Meditation at `EXCVADDR:0x00000078` (LVGL's `obj->styles` offset, dereferenced on a NULL `lv_obj_t *`) was observed on a v1 `set_status:sleeping` → brightness-config-update sequence. `scene_set_battery` now early-returns if any of the three battery HUD widgets are NULL, and `scene_create` logs `ESP_LOGE` on each `lv_obj_create` that fails. Hardware flash confirmed the three widgets *do* get created successfully at init on the fnk0104 (no OOM), so the invalidation is on a runtime path — the guards prevent the crash while the logs stand ready to catch a future recurrence.
 
 ### v1.5.0 — Dual-Board Support (Freenove ESP32-S3 2.8")
 
