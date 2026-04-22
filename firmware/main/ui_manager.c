@@ -7,9 +7,6 @@
 #include "config_store.h"
 #include "display.h"
 #include "rgb_led.h"
-#if BOARD_HAS_BATTERY
-#include "battery.h"
-#endif
 #include "esp_log.h"
 #include <stdio.h>
 #include <time.h>
@@ -284,18 +281,18 @@ void ui_manager_handle_event(const ble_evt_t *evt)
     case BLE_EVT_SET_STATUS: {
         display_status_t new_status = (display_status_t)evt->status;
         ESP_LOGI(TAG, "Set status: %d", new_status);
-        display_status_t old_status = s_display_status;
+        // display_status_t old_status = s_display_status;
         s_display_status = new_status;
 
         clawd_anim_id_t anim = status_to_anim(new_status);
         scene_set_fallback_anim(s_scene, anim);
 
-        /* Handle backlight for sleep/wake */
-        if (new_status == DISPLAY_STATUS_SLEEPING && old_status != DISPLAY_STATUS_SLEEPING) {
-            display_set_brightness(0);
-        } else if (new_status != DISPLAY_STATUS_SLEEPING && old_status == DISPLAY_STATUS_SLEEPING) {
-            display_set_brightness(config_store_get_brightness());
-        }
+        // Sleep blanking disabled — daemon set_status:sleeping no longer drops the backlight.
+        // if (new_status == DISPLAY_STATUS_SLEEPING && old_status != DISPLAY_STATUS_SLEEPING) {
+        //     display_set_brightness(0);
+        // } else if (new_status != DISPLAY_STATUS_SLEEPING && old_status == DISPLAY_STATUS_SLEEPING) {
+        //     display_set_brightness(config_store_get_brightness());
+        // }
 
         /* Don't interrupt a playing oneshot — the fallback will take effect when it finishes */
         if (!scene_is_playing_oneshot(s_scene)) {
@@ -335,15 +332,6 @@ void ui_manager_tick(void)
 
     /* Scene animation tick (sprite frame advance, star twinkle) */
     scene_tick(s_scene);
-
-#if BOARD_HAS_BATTERY
-    /* Battery HUD — poll() returns true only when the reading changed
-     * meaningfully, so we don't redraw every 5 ms. */
-    uint8_t bat_pct; bool bat_charging;
-    if (battery_poll(&bat_pct, &bat_charging)) {
-        scene_set_battery(s_scene, bat_pct, bat_charging);
-    }
-#endif
 
     /* Time update: check once per tick, update when minute changes */
     if (s_state != UI_STATE_NOTIFICATION && s_state != UI_STATE_DISCONNECTED) {

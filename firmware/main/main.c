@@ -16,9 +16,6 @@
 #if BOARD_HAS_TOUCH
 #include "touch.h"
 #endif
-#if BOARD_HAS_BATTERY
-#include "battery.h"
-#endif
 #include "esp_heap_caps.h"
 
 static const char *TAG = "clawd-tank";
@@ -74,11 +71,6 @@ void app_main(void) {
 #if BOARD_HAS_TOUCH
     // Capacitive touch — any tap clears notifications
     touch_init(s_evt_queue);
-#endif
-
-#if BOARD_HAS_BATTERY
-    // Battery ADC polling + HUD feed
-    battery_init();
 #endif
 
     // Start UI task

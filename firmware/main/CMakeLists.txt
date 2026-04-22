@@ -13,7 +13,6 @@ idf_component_register(
         "pixel_font.c"
         "button.c"       # BOARD_HAS_BOOT_BUTTON guards the body
         "touch.c"        # BOARD_HAS_TOUCH guards the body
-        "battery.c"      # BOARD_HAS_BATTERY guards the body
     INCLUDE_DIRS "."
-    REQUIRES esp_lcd driver esp_timer bt nvs_flash freertos json esp_adc
+    REQUIRES esp_lcd driver esp_timer bt nvs_flash freertos json
 )

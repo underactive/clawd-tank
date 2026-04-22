@@ -38,10 +38,6 @@ void scene_play_slot0_oneshot(scene_t *scene, clawd_anim_id_t anim);
 void scene_set_sessions(scene_t *scene, const uint8_t *anims, const uint16_t *ids,
                         int count, uint8_t subagent_count, uint8_t overflow);
 
-/* Battery HUD. Renders a small icon in the top-right of the scene container
- * showing fill level and charging state. On boards without a battery circuit,
- * the widgets stay hidden; calling this reveals them. pct clamps to 0..100. */
-void scene_set_battery(scene_t *scene, uint8_t pct, bool charging);
 #ifdef SIMULATOR
 void scene_get_anim_info(scene_t *scene, int *frame_count, int *frame_ms);
 int scene_get_frame_idx(scene_t *scene);

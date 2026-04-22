@@ -12,7 +12,7 @@ menu "Clawd Configuration"
 
             The Freenove board (fnk0104) is the second supported target:
             ESP32-S3 + 320x240 ILI9341 SPI display, FT6336G capacitive touch,
-            8 MB OPI PSRAM, 16 MB flash, battery sense on GPIO 9.
+            8 MB OPI PSRAM, 16 MB flash.
 
         config BOARD_WAVESHARE_C6_LCD147
             bool "Waveshare ESP32-C6-LCD-1.47"

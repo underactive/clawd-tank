@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Removed
+
+- **Battery HUD and ADC sensing** — The small battery glyph rendered top-right of the scene on the fnk0104 is gone, along with all voltage-divider sampling code. Motivation: the feature was a source of repeated LVGL invalidation bugs (pre-flush render race on boot, stale pixels after notification-panel dismissal, an `lv_obj_invalidate` infinite loop when hiding the widget while the scene container's width animation was in-flight) and its primary value — seeing LiPo percentage — didn't justify the complexity for a device that is usually plugged in. Deletes `battery.c`, `battery.h`, `scene_set_battery`, the `battery_body/fill/nub` widgets, and every `BOARD_HAS_BATTERY`-gated code path. The GPIO 9 voltage divider on the fnk0104 is still physically present but no longer read by firmware. `esp_adc` dropped from `REQUIRES` in `firmware/main/CMakeLists.txt`.
+
+### Changed
+
+- **Daemon-driven sleep blanking disabled** — `BLE_EVT_SET_STATUS` with `sleeping` no longer sets the backlight PWM duty to 0. The status transition and sleeping-crab animation still run, so the visual indicator is preserved — only the blackout is removed. The behavior was surprising on a display that is usually desk-side; users preferred keeping the screen on at the configured brightness. Re-enabling is a single-line revert in `ui_manager.c`. The explicit `set_status:brightness=0` BLE-config path still works for manual blackout.
+
+### Fixed
+
+- **Stale pixels under dismissed notification panel** — LVGL's implicit `HIDDEN` invalidation on `notification_ui_show(false)` was not reliably marking scene HUD widgets (time label) as dirty, leaving fragments of the panel's prior content until another scene change forced a redraw. Both hide paths (instant and fade-out animation) now explicitly `lv_obj_invalidate(lv_obj_get_parent(ui->container))`, guaranteeing everything underneath re-renders on the next flush.
+
 ## [1.5.1] - 2026-04-22
 
 ### Fixed

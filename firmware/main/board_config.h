@@ -36,7 +36,6 @@
 
 #define BOARD_HAS_BOOT_BUTTON  0
 #define BOARD_HAS_TOUCH        0
-#define BOARD_HAS_BATTERY      0
 #define BOARD_HAS_PSRAM        0
 
 // RGB LED GPIO is ignored by the simulator's led_strip shim (see
@@ -81,7 +80,6 @@
 
 // --- Capability flags (what this board lacks)
 #define BOARD_HAS_TOUCH     0
-#define BOARD_HAS_BATTERY   0
 #define BOARD_HAS_PSRAM     0
 
 // ============================================================================
@@ -140,14 +138,6 @@
 #define BOARD_TOUCH_I2C_ADDR    0x38
 #define BOARD_TOUCH_NATIVE_W    240   // raw panel reports portrait coordinates
 #define BOARD_TOUCH_NATIVE_H    320
-
-// --- Battery sense (LiPo, 2x voltage divider on GPIO 9, ADC1_CH8)
-#define BOARD_HAS_BATTERY       1
-#define BOARD_BATTERY_ADC_GPIO  9
-#define BOARD_BATTERY_DIVIDER   2.0f
-#define BOARD_BATTERY_FULL_MV   4200
-#define BOARD_BATTERY_EMPTY_MV  3000
-#define BOARD_BATTERY_CHARGING_MV 4100  // > this under load => charging
 
 // --- Memory
 #define BOARD_HAS_PSRAM   1

@@ -202,6 +202,12 @@ void notification_ui_show(notification_ui_t *ui, bool show, int anim_ms)
         } else {
             lv_obj_set_style_opa(ui->container, LV_OPA_COVER, LV_PART_MAIN);
             lv_obj_add_flag(ui->container, LV_OBJ_FLAG_HIDDEN);
+            /* Force a full redraw of the area under the panel. LVGL's HIDDEN
+             * invalidation alone isn't reliably picking up scene HUD widgets
+             * (e.g. time label) that were covered — they can be left stale in
+             * the partial-render buffer. Invalidating the parent guarantees
+             * everything underneath gets re-rendered on the next flush. */
+            lv_obj_invalidate(lv_obj_get_parent(ui->container));
         }
     }
 }
@@ -219,6 +225,8 @@ static void fade_hide_completed_cb(lv_anim_t *a)
     lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
     /* Reset opacity so the next fade-in starts clean */
     lv_obj_set_style_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
+    /* Force redraw under the panel — see note in notification_ui_show(). */
+    lv_obj_invalidate(lv_obj_get_parent(obj));
 }
 
 /* ---------- Expand/collapse animation ---------- */
