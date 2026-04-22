@@ -533,13 +533,16 @@ scene_t *scene_create(lv_obj_t *parent)
     lv_obj_clear_flag(s->container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_user_data(s->container, s);  /* for walk_in_complete_cb */
 
-    /* Sky background — gradient top to bottom */
+    /* Sky background — gradient top to bottom. Endpoints are spread wide
+     * enough (≥60 steps per channel) that every row in a 240-tall widget
+     * lands on a distinct color. A narrower spread banded visibly on the
+     * 320x240 panel; the eye reads the band edges as "tiling". */
     s->sky = lv_obj_create(s->container);
     lv_obj_remove_style_all(s->sky);
     lv_obj_set_size(s->sky, lv_pct(100), SCENE_HEIGHT);
     lv_obj_set_style_bg_opa(s->sky, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(s->sky, lv_color_hex(0x0a0e1a), 0);
-    lv_obj_set_style_bg_grad_color(s->sky, lv_color_hex(0x1a1a2e), 0);
+    lv_obj_set_style_bg_color(s->sky, lv_color_hex(0x02030a), 0);
+    lv_obj_set_style_bg_grad_color(s->sky, lv_color_hex(0x26264a), 0);
     lv_obj_set_style_bg_grad_dir(s->sky, LV_GRAD_DIR_VER, 0);
 
     /* Stars */

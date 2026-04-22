@@ -3,7 +3,12 @@
  * so that shared firmware sources (ui_manager.c) can link against them. */
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 void display_set_brightness(uint8_t duty) {
     printf("[sim] display_set_brightness(%d)\n", duty);
+}
+
+void display_set_flipped(bool flipped) {
+    printf("[sim] display_set_flipped(%d)\n", (int)flipped);
 }
