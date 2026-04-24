@@ -15,17 +15,21 @@
 static uint8_t  mock_brightness = 0;
 static uint16_t mock_sleep_timeout = 0;
 static uint8_t  mock_display_flipped = 0;
+static uint8_t  mock_sound_enabled = 0;
 static int mock_brightness_set = 0;
 static int mock_sleep_timeout_set = 0;
 static int mock_display_flipped_set = 0;
+static int mock_sound_enabled_set = 0;
 
 static void mock_nvs_reset(void) {
     mock_brightness = 0;
     mock_sleep_timeout = 0;
     mock_display_flipped = 0;
+    mock_sound_enabled = 0;
     mock_brightness_set = 0;
     mock_sleep_timeout_set = 0;
     mock_display_flipped_set = 0;
+    mock_sound_enabled_set = 0;
 }
 
 esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *handle) {
@@ -42,6 +46,10 @@ esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *val) {
     }
     if (strcmp(key, "disp_flip") == 0 && mock_display_flipped_set) {
         *val = mock_display_flipped;
+        return ESP_OK;
+    }
+    if (strcmp(key, "sound_en") == 0 && mock_sound_enabled_set) {
+        *val = mock_sound_enabled;
         return ESP_OK;
     }
     return ESP_ERR_NVS_NOT_FOUND;
@@ -64,6 +72,9 @@ esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t val) {
     } else if (strcmp(key, "disp_flip") == 0) {
         mock_display_flipped = val;
         mock_display_flipped_set = 1;
+    } else if (strcmp(key, "sound_en") == 0) {
+        mock_sound_enabled = val;
+        mock_sound_enabled_set = 1;
     }
     return ESP_OK;
 }
@@ -156,6 +167,36 @@ static void test_display_flipped_loads_from_nvs(void) {
     printf("  PASS: test_display_flipped_loads_from_nvs\n");
 }
 
+static void test_sound_enabled_default_true(void) {
+    mock_nvs_reset();
+    config_store_init();
+    assert(config_store_get_sound_enabled() == true);
+    printf("  PASS: test_sound_enabled_default_true\n");
+}
+
+static void test_set_sound_enabled_persists(void) {
+    mock_nvs_reset();
+    config_store_init();
+    config_store_set_sound_enabled(false);
+    assert(config_store_get_sound_enabled() == false);
+    assert(mock_sound_enabled == 0);
+    assert(mock_sound_enabled_set == 1);
+
+    config_store_set_sound_enabled(true);
+    assert(config_store_get_sound_enabled() == true);
+    assert(mock_sound_enabled == 1);
+    printf("  PASS: test_set_sound_enabled_persists\n");
+}
+
+static void test_sound_enabled_loads_from_nvs(void) {
+    mock_nvs_reset();
+    mock_sound_enabled = 0;
+    mock_sound_enabled_set = 1;
+    config_store_init();
+    assert(config_store_get_sound_enabled() == false);
+    printf("  PASS: test_sound_enabled_loads_from_nvs\n");
+}
+
 static void test_serialize_json(void) {
     mock_nvs_reset();
     config_store_init();
@@ -171,7 +212,20 @@ static void test_serialize_json(void) {
     assert(strstr(buf, "\"brightness\":128") != NULL);
     assert(strstr(buf, "\"sleep_timeout\":600") != NULL);
     assert(strstr(buf, "\"display_flipped\":0") != NULL);
+    assert(strstr(buf, "\"sound_enabled\":1") != NULL);
     printf("  PASS: test_serialize_json\n");
+}
+
+static void test_serialize_json_includes_sound_enabled(void) {
+    mock_nvs_reset();
+    config_store_init();
+    config_store_set_sound_enabled(false);
+
+    char buf[256];
+    uint16_t len = config_store_serialize_json(buf, sizeof(buf));
+    assert(len > 0);
+    assert(strstr(buf, "\"sound_enabled\":0") != NULL);
+    printf("  PASS: test_serialize_json_includes_sound_enabled\n");
 }
 
 static void test_serialize_json_includes_display_flipped(void) {
@@ -224,8 +278,12 @@ int main(void) {
     test_display_flipped_default_false();
     test_set_display_flipped_persists();
     test_display_flipped_loads_from_nvs();
+    test_sound_enabled_default_true();
+    test_set_sound_enabled_persists();
+    test_sound_enabled_loads_from_nvs();
     test_serialize_json();
     test_serialize_json_includes_display_flipped();
+    test_serialize_json_includes_sound_enabled();
     test_serialize_json_default_values();
     test_serialize_json_small_buffer();
     printf("All config store tests passed!\n");

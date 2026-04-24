@@ -158,7 +158,7 @@
 #define BOARD_AUDIO_CODEC_I2C_ADDR  0x18    // ES8311 with CE tied low
 #define BOARD_AUDIO_SAMPLE_RATE     24000
 #define BOARD_AUDIO_MCLK_MULT       256
-#define BOARD_AUDIO_VOLUME_PCT      60
+#define BOARD_AUDIO_VOLUME_PCT      40
 
 // --- Memory
 #define BOARD_HAS_PSRAM   1

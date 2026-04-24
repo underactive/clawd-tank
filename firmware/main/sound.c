@@ -3,6 +3,7 @@
 
 #if BOARD_HAS_AUDIO
 
+#include "config_store.h"
 #include "i2c_bus.h"
 #include "es8311.h"
 #include "driver/i2s_std.h"
@@ -181,6 +182,9 @@ void sound_play(sound_id_t id)
 {
     if (!s_tx_chan) { ESP_LOGW(TAG, "sound_play(%d): ignored — not initialized", id); return; }
     if (id >= SOUND_COUNT) { ESP_LOGW(TAG, "sound_play: bad id %d", id); return; }
+    /* Mute gate. Any in-flight clip will still finish — the gate is
+     * edge-triggered to match the rest of this entry point. */
+    if (!config_store_get_sound_enabled()) { ESP_LOGD(TAG, "sound_play(%d): muted", id); return; }
     if (s_playing) { ESP_LOGD(TAG, "sound_play(%d): already playing, skipping", id); return; }
 
     const sound_clip_t *c = &s_clips[id];

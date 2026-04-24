@@ -295,6 +295,25 @@ static int config_access_cb(uint16_t conn_handle, uint16_t attr_handle,
             }
         }
 
+        /* Mute/unmute sound effects. The gate lives in sound_play(), so
+         * persisting here is enough — no UI-task event needed. */
+        cJSON *sound_enabled = cJSON_GetObjectItem(json, "sound_enabled");
+        if (sound_enabled) {
+            bool val = true;
+            bool recognized = true;
+            if (cJSON_IsBool(sound_enabled)) {
+                val = cJSON_IsTrue(sound_enabled);
+            } else if (cJSON_IsNumber(sound_enabled)) {
+                val = (sound_enabled->valueint != 0);
+            } else {
+                recognized = false;
+            }
+            if (recognized) {
+                config_store_set_sound_enabled(val);
+                ESP_LOGI(TAG, "Config: sound_enabled=%d", (int)val);
+            }
+        }
+
         cJSON_Delete(json);
         return 0;
     }

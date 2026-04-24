@@ -112,6 +112,13 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             callback=self._on_toggle_display_flipped,
         )
 
+        # Sound effects toggle — device-side config (only the fnk0104 board
+        # has audio hardware; the C6 stores the flag harmlessly).
+        self._sound_enabled_item = rumps.MenuItem(
+            "Enable Sounds",
+            callback=self._on_toggle_sound_enabled,
+        )
+
         # Claude Code hooks
         self._hooks_item = rumps.MenuItem(
             "Install Claude Code Hooks",
@@ -145,6 +152,7 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             self._brightness_item,
             self._session_timeout_menu,
             self._display_flipped_item,
+            self._sound_enabled_item,
             None,
             self._hooks_item,
             self._login_item,
@@ -304,10 +312,16 @@ class ClawdTankApp(rumps.App, DaemonObserver):
                 self._current_config.get("display_flipped", False)
             )
             self._display_flipped_item.set_callback(self._on_toggle_display_flipped)
+
+            self._sound_enabled_item.state = bool(
+                self._current_config.get("sound_enabled", True)
+            )
+            self._sound_enabled_item.set_callback(self._on_toggle_sound_enabled)
         else:
             self.icon = self._icon_path("crab-disconnected")
             self._brightness_slider.set_enabled(False)
             self._display_flipped_item.set_callback(None)
+            self._sound_enabled_item.set_callback(None)
         self.title = ""
 
     def _icon_path(self, name: str) -> Optional[str]:
@@ -359,6 +373,19 @@ class ClawdTankApp(rumps.App, DaemonObserver):
         self._current_config["display_flipped"] = new_state
         if self._loop and self._connected:
             payload = json.dumps({"display_flipped": new_state})
+            asyncio.run_coroutine_threadsafe(
+                self._daemon.write_config(payload), self._loop
+            )
+
+    def _on_toggle_sound_enabled(self, sender):
+        """Mute or unmute on-device sound effects. Optimistic toggle — the
+        checkbox flips immediately; the next config-read on reconnect will
+        correct drift if the BLE write fails."""
+        new_state = not sender.state
+        sender.state = new_state
+        self._current_config["sound_enabled"] = new_state
+        if self._loop and self._connected:
+            payload = json.dumps({"sound_enabled": new_state})
             asyncio.run_coroutine_threadsafe(
                 self._daemon.write_config(payload), self._loop
             )

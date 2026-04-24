@@ -37,6 +37,16 @@ The config characteristic now accepts an optional boolean field `display_flipped
 
 Write payload accepts JSON `true`/`false` or the numbers `0`/`1`. Unknown config fields are ignored by the firmware (and always have been), so v1/early-v2 clients that don't send this field keep working unchanged. No GATT version bump.
 
+**Config field addition: `sound_enabled`** (additive, non-breaking)
+
+Optional boolean field `sound_enabled`. When `false`, the firmware mutes on-device sound effects at the `sound_play()` entry point — in-flight clips still finish, but no new clips start. Defaults to `true`. Persisted to NVS under the `sound_en` key. Read-back now includes the field:
+
+```json
+{"brightness":230,"sleep_timeout":300,"display_flipped":false,"sound_enabled":true}
+```
+
+Accepts JSON `true`/`false` or `0`/`1`. Boards without audio hardware (e.g. Waveshare C6) persist the value harmlessly — the gate is only meaningful on the fnk0104 S3 board. Unknown-field tolerance keeps older clients working. No GATT version bump.
+
 ## Version 1 (current)
 
 The original protocol. No version characteristic — the daemon infers v1 from its absence.
