@@ -1,5 +1,6 @@
 import json
 from clawd_tank_daemon.protocol import (
+    NOTIFICATION_DEFAULT_TTL_MS,
     hook_payload_to_daemon_message,
     daemon_message_to_ble_payload,
     display_state_to_ble_payload,
@@ -66,6 +67,36 @@ def test_daemon_add_to_ble():
     assert parsed["id"] == "s1"
     assert parsed["project"] == "proj"
     assert parsed["message"] == "hi"
+
+
+def test_daemon_add_includes_default_ttl_ms():
+    """Regular notifications carry ttl_ms so the firmware can drive the
+    countdown bar and the daemon can schedule its own auto-dismiss."""
+    msg = {
+        "event": "add",
+        "hook": "Notification",
+        "session_id": "s1",
+        "project": "proj",
+        "message": "hi",
+    }
+    ble = daemon_message_to_ble_payload(msg)
+    parsed = json.loads(ble)
+    assert parsed["ttl_ms"] == NOTIFICATION_DEFAULT_TTL_MS
+
+
+def test_daemon_add_error_omits_ttl_ms():
+    """StopFailure errors must not auto-dismiss — no ttl_ms in the payload."""
+    msg = {
+        "event": "add",
+        "hook": "StopFailure",
+        "session_id": "s1",
+        "project": "proj",
+        "message": "boom",
+    }
+    ble = daemon_message_to_ble_payload(msg)
+    parsed = json.loads(ble)
+    assert parsed.get("alert") == "error"
+    assert "ttl_ms" not in parsed
 
 
 def test_daemon_dismiss_to_ble():

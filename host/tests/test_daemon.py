@@ -625,3 +625,118 @@ async def test_handle_message_broadcasts_to_dynamically_added_transport():
         await daemon._sender_tasks["sim"]
     except asyncio.CancelledError:
         pass
+
+
+# --- Notification TTL auto-dismiss ---
+
+
+@pytest.mark.asyncio
+async def test_add_schedules_auto_dismiss_handle():
+    """A regular add arms a TimerHandle keyed by session_id."""
+    daemon = ClawdDaemon()
+    await daemon._handle_message(
+        {"event": "add", "hook": "Notification", "session_id": "s1",
+         "project": "p", "message": "m"}
+    )
+    assert "s1" in daemon._notification_ttl_handles
+    # Clean up so the test process doesn't hold a pending handle.
+    daemon._cancel_auto_dismiss("s1")
+
+
+@pytest.mark.asyncio
+async def test_stopfailure_add_does_not_schedule_auto_dismiss():
+    """Error notifications must NOT have a TTL timer — they persist."""
+    daemon = ClawdDaemon()
+    await daemon._handle_message(
+        {"event": "add", "hook": "StopFailure", "session_id": "s1",
+         "project": "p", "message": "boom"}
+    )
+    assert "s1" in daemon._active_notifications
+    assert "s1" not in daemon._notification_ttl_handles
+
+
+@pytest.mark.asyncio
+async def test_manual_dismiss_cancels_auto_dismiss():
+    """A user-driven dismiss must cancel the pending TTL timer so it
+    doesn't fire later and broadcast a redundant dismiss."""
+    daemon = ClawdDaemon()
+    await daemon._handle_message(
+        {"event": "add", "hook": "Notification", "session_id": "s1",
+         "project": "p", "message": "m"}
+    )
+    handle = daemon._notification_ttl_handles["s1"]
+    await daemon._handle_message(
+        {"event": "dismiss", "hook": "UserPromptSubmit", "session_id": "s1"}
+    )
+    assert "s1" not in daemon._notification_ttl_handles
+    assert handle.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_add_replaces_auto_dismiss_handle():
+    """A re-fired add for the same session_id replaces the existing timer,
+    matching the firmware's 'reset created_tick on re-add' semantics."""
+    daemon = ClawdDaemon()
+    await daemon._handle_message(
+        {"event": "add", "hook": "Notification", "session_id": "s1",
+         "project": "p", "message": "first"}
+    )
+    first = daemon._notification_ttl_handles["s1"]
+    await daemon._handle_message(
+        {"event": "add", "hook": "Notification", "session_id": "s1",
+         "project": "p", "message": "second"}
+    )
+    second = daemon._notification_ttl_handles["s1"]
+    assert first is not second
+    assert first.cancelled()
+    daemon._cancel_auto_dismiss("s1")
+
+
+@pytest.mark.asyncio
+async def test_auto_dismiss_fires_and_broadcasts_dismiss():
+    """When the TTL elapses, _fire_auto_dismiss must drop the notification,
+    put a dismiss message on every transport queue, and clear the handle."""
+    daemon = ClawdDaemon()
+    await daemon._handle_message(
+        {"event": "add", "hook": "Notification", "session_id": "s1",
+         "project": "p", "message": "m"}
+    )
+    # Drain the add event from the queue so we can assert the dismiss
+    # message alone arrives after the timer fires.
+    _ = await daemon._transport_queues["ble"].get()
+    assert "s1" in daemon._active_notifications
+
+    # Simulate the TimerHandle firing synchronously. _fire_auto_dismiss
+    # schedules a task to call _handle_message; wait for it to run.
+    daemon._fire_auto_dismiss("s1")
+    await asyncio.sleep(0)  # yield once so the created task runs
+    await asyncio.sleep(0)  # _handle_message has several awaits; drain them
+
+    assert "s1" not in daemon._active_notifications
+    assert "s1" not in daemon._notification_ttl_handles
+    dismissed = await daemon._transport_queues["ble"].get()
+    assert dismissed["event"] == "dismiss"
+    assert dismissed["session_id"] == "s1"
+    assert dismissed["hook"] == "auto_dismiss"
+
+
+@pytest.mark.asyncio
+async def test_fire_auto_dismiss_no_op_if_already_dismissed():
+    """If the user manually dismissed between scheduling and the timer
+    firing (rare race), _fire_auto_dismiss must not synthesize a second
+    dismiss message."""
+    daemon = ClawdDaemon()
+    await daemon._handle_message(
+        {"event": "add", "hook": "Notification", "session_id": "s1",
+         "project": "p", "message": "m"}
+    )
+    await daemon._handle_message(
+        {"event": "dismiss", "hook": "UserPromptSubmit", "session_id": "s1"}
+    )
+    # Drain the two queue items (add + dismiss) from the normal flow.
+    await daemon._transport_queues["ble"].get()
+    await daemon._transport_queues["ble"].get()
+
+    daemon._fire_auto_dismiss("s1")  # stale handle path
+    await asyncio.sleep(0)
+    assert daemon._transport_queues["ble"].empty()

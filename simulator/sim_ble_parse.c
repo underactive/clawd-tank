@@ -68,6 +68,9 @@ int sim_ble_parse_json(const char *buf, uint16_t len, ble_evt_t *out) {
                      sizeof(out->message));
         cJSON *alert = cJSON_GetObjectItem(json, "alert");
         out->alert = (alert && cJSON_IsString(alert) && strcmp(alert->valuestring, "error") == 0) ? 1 : 0;
+        cJSON *ttl = cJSON_GetObjectItem(json, "ttl_ms");
+        out->ttl_ms = (ttl && cJSON_IsNumber(ttl) && ttl->valuedouble > 0)
+                      ? (uint32_t)ttl->valuedouble : 0;
     } else if (strcmp(action->valuestring, "dismiss") == 0) {
         out->type = BLE_EVT_NOTIF_DISMISS;
         cJSON *id = cJSON_GetObjectItem(json, "id");

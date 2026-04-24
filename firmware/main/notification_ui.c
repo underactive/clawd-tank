@@ -12,6 +12,8 @@
 #define FEATURED_H_EXPANDED   (SCREEN_H - COUNTER_H - 8)  /* fills panel on new notif */
 #define COMPACT_ROW_H         14
 #define DOT_SIZE              6
+#define FEATURED_BAR_H        2  /* countdown progress strip — featured card */
+#define COMPACT_BAR_H         1  /* countdown progress strip — compact rows */
 
 /* How long the expanded "hero" view is shown before shrinking to compact list */
 #define EXPAND_HOLD_MS        2500
@@ -41,9 +43,12 @@ struct notification_ui_t {
     lv_obj_t *featured_project;
     lv_obj_t *featured_message;
     lv_obj_t *featured_badge;
+    lv_obj_t *featured_progress;
 
     /* Compact list entries */
     lv_obj_t *compact_rows[NOTIF_MAX_COUNT];
+    lv_obj_t *compact_progress[NOTIF_MAX_COUNT];
+    int compact_rows_to_sorted[NOTIF_MAX_COUNT];  /* maps compact row -> sorted index */
     int compact_count;
 
     /* Sorted notification cache */
@@ -133,6 +138,19 @@ notification_ui_t *notification_ui_create(lv_obj_t *parent)
     lv_obj_set_style_text_color(ui->featured_badge, lv_color_hex(0x88cc88), 0);
     lv_obj_set_pos(ui->featured_badge, 0, 38);
 
+    /* Featured: countdown progress strip. Parented to the container (not the
+     * card) so it sits *below* the card border in the gap before the compact
+     * rows — keeps it away from the "NEWEST"/"N/M" badge text baseline, which
+     * extends almost all the way to the card's inner bottom. Position and
+     * width are set in rebuild_display / notification_ui_tick. */
+    ui->featured_progress = lv_obj_create(ui->container);
+    lv_obj_remove_style_all(ui->featured_progress);
+    lv_obj_set_style_bg_opa(ui->featured_progress, LV_OPA_80, 0);
+    lv_obj_set_style_bg_color(ui->featured_progress, lv_color_hex(accent_colors[0]), 0);
+    lv_obj_set_style_radius(ui->featured_progress, 1, 0);
+    lv_obj_set_size(ui->featured_progress, 0, FEATURED_BAR_H);
+    lv_obj_add_flag(ui->featured_progress, LV_OBJ_FLAG_HIDDEN);
+
     /* Auto-rotation timer */
     ui->rotation_timer = lv_timer_create(rotation_timer_cb, ROTATION_INTERVAL_MS, ui);
     lv_timer_pause(ui->rotation_timer);
@@ -148,6 +166,10 @@ notification_ui_t *notification_ui_create(lv_obj_t *parent)
     ui->featured_idx = 0;
     ui->compact_count = 0;
     ui->featured_expanded = false;
+    for (int i = 0; i < NOTIF_MAX_COUNT; i++) {
+        ui->compact_progress[i] = NULL;
+        ui->compact_rows_to_sorted[i] = -1;
+    }
 
     return ui;
 }
@@ -360,12 +382,15 @@ static void rebuild_display(notification_ui_t *ui)
     if (count == 0) {
         lv_label_set_text(ui->counter_label, "");
         lv_obj_add_flag(ui->featured_card, LV_OBJ_FLAG_HIDDEN);
-        /* Remove compact rows */
+        lv_obj_add_flag(ui->featured_progress, LV_OBJ_FLAG_HIDDEN);
+        /* Remove compact rows (progress widgets are children — deleted with them) */
         for (int i = 0; i < ui->compact_count; i++) {
             if (ui->compact_rows[i]) {
                 lv_obj_delete(ui->compact_rows[i]);
                 ui->compact_rows[i] = NULL;
             }
+            ui->compact_progress[i] = NULL;
+            ui->compact_rows_to_sorted[i] = -1;
         }
         ui->compact_count = 0;
         return;
@@ -389,6 +414,20 @@ static void rebuild_display(notification_ui_t *ui)
         lv_label_set_text(ui->featured_project, ui->sorted[fi].project);
         lv_label_set_text(ui->featured_message, ui->sorted[fi].message);
 
+        /* Countdown bar tracks the featured slot's accent; width is set from
+         * notification_ui_tick. Hidden when the slot has no TTL.
+         * Position bar 1 px below the card's outer edge so it doesn't clip
+         * the border or overlap the badge text. */
+        lv_obj_set_style_bg_color(ui->featured_progress,
+                                  lv_color_hex(accent_colors[color_idx]), 0);
+        lv_obj_set_pos(ui->featured_progress, 4,
+                       COUNTER_H + 2 + FEATURED_H_EXPANDED + 1);
+        if (ui->sorted[fi].ttl_ms > 0) {
+            lv_obj_clear_flag(ui->featured_progress, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(ui->featured_progress, LV_OBJ_FLAG_HIDDEN);
+        }
+
         /* In hero view, show a prominent "NEW" badge lower in the card */
         lv_obj_set_pos(ui->featured_badge, 0, FEATURED_H_EXPANDED - 24);
         lv_label_set_text(ui->featured_badge, "NEW");
@@ -401,6 +440,8 @@ static void rebuild_display(notification_ui_t *ui)
                 lv_obj_delete(ui->compact_rows[i]);
                 ui->compact_rows[i] = NULL;
             }
+            ui->compact_progress[i] = NULL;
+            ui->compact_rows_to_sorted[i] = -1;
         }
         ui->compact_count = 0;
         return;
@@ -423,6 +464,20 @@ static void rebuild_display(notification_ui_t *ui)
     lv_obj_set_style_border_color(ui->featured_card,
                                   lv_color_hex(accent_colors[color_idx]), 0);
 
+    /* Countdown bar: match featured accent; shown only if the slot has a TTL.
+     * Sits just below the card's outer edge, in the 6 px gap before the
+     * compact list — well clear of the badge text that sits near the card's
+     * inner bottom. */
+    lv_obj_set_style_bg_color(ui->featured_progress,
+                              lv_color_hex(accent_colors[color_idx]), 0);
+    lv_obj_set_pos(ui->featured_progress, 4,
+                   COUNTER_H + 2 + FEATURED_H + 1);
+    if (ui->sorted[fi].ttl_ms > 0) {
+        lv_obj_clear_flag(ui->featured_progress, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(ui->featured_progress, LV_OBJ_FLAG_HIDDEN);
+    }
+
     /* Set full text — SCROLL_CIRCULAR mode will marquee if it overflows */
     lv_label_set_text(ui->featured_project, ui->sorted[fi].project);
     lv_label_set_text(ui->featured_message, ui->sorted[fi].message);
@@ -442,12 +497,14 @@ static void rebuild_display(notification_ui_t *ui)
                                     lv_color_hex(0x888888), 0);
     }
 
-    /* Remove old compact rows */
+    /* Remove old compact rows (progress widgets are children — deleted with them) */
     for (int i = 0; i < ui->compact_count; i++) {
         if (ui->compact_rows[i]) {
             lv_obj_delete(ui->compact_rows[i]);
             ui->compact_rows[i] = NULL;
         }
+        ui->compact_progress[i] = NULL;
+        ui->compact_rows_to_sorted[i] = -1;
     }
     ui->compact_count = 0;
 
@@ -491,7 +548,21 @@ static void rebuild_display(notification_ui_t *ui)
         lv_obj_set_width(label, lv_pct(85));
         lv_label_set_text(label, ui->sorted[i].project);
 
+        /* Countdown progress strip along the bottom of the row. Width is
+         * managed by notification_ui_tick; hidden when the slot has no TTL. */
+        lv_obj_t *bar = lv_obj_create(row);
+        lv_obj_remove_style_all(bar);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_80, 0);
+        lv_obj_set_style_bg_color(bar, lv_color_hex(accent_colors[row_color_idx]), 0);
+        lv_obj_set_size(bar, 0, COMPACT_BAR_H);
+        lv_obj_set_align(bar, LV_ALIGN_BOTTOM_LEFT);
+        if (ui->sorted[i].ttl_ms == 0) {
+            lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+        }
+
         ui->compact_rows[ci] = row;
+        ui->compact_progress[ci] = bar;
+        ui->compact_rows_to_sorted[ci] = i;
         ui->compact_count++;
         y_pos += COMPACT_ROW_H;
     }
@@ -507,4 +578,44 @@ static void rotation_timer_cb(lv_timer_t *timer)
     /* Cycle through notifications */
     ui->featured_idx = (ui->featured_idx + 1) % ui->sorted_count;
     rebuild_display(ui);
+}
+
+/* ---------- Countdown tick ---------- */
+
+/* Returns remaining life as an integer percent in [0, 100]. 0 when expired. */
+static int remaining_pct(uint32_t now_tick, uint32_t created_tick, uint32_t ttl_ms) {
+    if (ttl_ms == 0) return 0;
+    uint32_t elapsed = now_tick - created_tick;
+    if (elapsed >= ttl_ms) return 0;
+    uint32_t remaining = ttl_ms - elapsed;
+    return (int)((remaining * 100u) / ttl_ms);
+}
+
+void notification_ui_tick(notification_ui_t *ui, uint32_t now_tick)
+{
+    if (!ui || ui->sorted_count == 0) return;
+
+    /* Featured slot progress. The bar's parent is the container (not the
+     * card), whose width is ~5% wider than the card's lv_pct(95). Scale the
+     * remaining-percent down so a full bar visually matches the card's
+     * right edge at x=4 + lv_pct(95). */
+    int fi = ui->featured_idx;
+    if (fi >= ui->sorted_count) fi = ui->sorted_count - 1;
+    const notification_t *fn = &ui->sorted[fi];
+    if (fn->ttl_ms > 0 && ui->featured_progress) {
+        int pct = remaining_pct(now_tick, fn->created_tick, fn->ttl_ms);
+        int scaled = (pct * 95) / 100;  /* 100% → lv_pct(95), matches card width */
+        lv_obj_set_width(ui->featured_progress, lv_pct(scaled));
+    }
+
+    /* Compact row progress */
+    for (int ci = 0; ci < ui->compact_count; ci++) {
+        int si = ui->compact_rows_to_sorted[ci];
+        if (si < 0 || si >= ui->sorted_count) continue;
+        const notification_t *n = &ui->sorted[si];
+        lv_obj_t *bar = ui->compact_progress[ci];
+        if (!bar || n->ttl_ms == 0) continue;
+        int pct = remaining_pct(now_tick, n->created_tick, n->ttl_ms);
+        lv_obj_set_width(bar, lv_pct(pct));
+    }
 }

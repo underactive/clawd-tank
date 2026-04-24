@@ -15,4 +15,9 @@ void notification_ui_rebuild(notification_ui_t *ui, const notification_store_t *
  * then auto-collapse to compact list after EXPAND_HOLD_MS. */
 void notification_ui_trigger_hero(notification_ui_t *ui);
 
+/* Advance the per-notification countdown progress bars based on elapsed time
+ * since each slot's created_tick. Cheap to call every UI tick; does nothing
+ * for slots whose ttl_ms is 0. */
+void notification_ui_tick(notification_ui_t *ui, uint32_t now_tick);
+
 #endif // NOTIFICATION_UI_H

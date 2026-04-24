@@ -248,8 +248,9 @@ void ui_manager_handle_event(const ble_evt_t *evt)
         break;
 
     case BLE_EVT_NOTIF_ADD:
-        ESP_LOGI(TAG, "Add: %s (%s)", evt->id, evt->project);
-        notif_store_add(&s_store, evt->id, evt->project, evt->message);
+        ESP_LOGI(TAG, "Add: %s (%s) ttl_ms=%u", evt->id, evt->project, (unsigned)evt->ttl_ms);
+        notif_store_add_with_ttl(&s_store, evt->id, evt->project, evt->message,
+                                 lv_tick_get(), evt->ttl_ms);
         notification_ui_rebuild(s_notif_ui, &s_store);
         /* Show new notification in expanded hero view, then auto-collapse */
         notification_ui_trigger_hero(s_notif_ui);
@@ -396,6 +397,21 @@ void ui_manager_tick(void)
     /* Stream queued PCM to I2S — cheap no-op while idle. */
     sound_update();
 #endif
+
+    /* Notification auto-dismiss + countdown bars. Expire first so an expired
+     * slot doesn't flash a zero-width bar for one frame before rebuild. */
+    if (s_state == UI_STATE_NOTIFICATION) {
+        uint32_t now = lv_tick_get();
+        int expired = notif_store_expire(&s_store, now);
+        if (expired > 0) {
+            if (notif_store_count(&s_store) == 0) {
+                transition_to(UI_STATE_FULL_IDLE);
+            } else {
+                notification_ui_rebuild(s_notif_ui, &s_store);
+            }
+        }
+        notification_ui_tick(s_notif_ui, now);
+    }
 
     /* Time update: check once per tick, update when minute changes */
     if (s_state != UI_STATE_NOTIFICATION && s_state != UI_STATE_DISCONNECTED) {

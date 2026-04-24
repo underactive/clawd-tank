@@ -437,7 +437,7 @@ static void handle_sdl_events(void)
                 break;
             }
             case SDLK_n: {
-                ble_evt_t evt = { .type = BLE_EVT_NOTIF_ADD };
+                ble_evt_t evt = { .type = BLE_EVT_NOTIF_ADD, .ttl_ms = NOTIF_DEFAULT_TTL_MS };
                 const char *proj = sample_notifs[s_sample_notif_idx % SAMPLE_COUNT].project;
                 const char *msg  = sample_notifs[s_sample_notif_idx % SAMPLE_COUNT].message;
                 snprintf(evt.id, sizeof(evt.id), "key_%d", s_sample_notif_idx);

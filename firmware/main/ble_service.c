@@ -115,6 +115,9 @@ static void parse_notification_json(const char *buf, uint16_t len) {
                      sizeof(evt.message));
         cJSON *alert = cJSON_GetObjectItem(json, "alert");
         evt.alert = (alert && cJSON_IsString(alert) && strcmp(alert->valuestring, "error") == 0) ? 1 : 0;
+        cJSON *ttl = cJSON_GetObjectItem(json, "ttl_ms");
+        evt.ttl_ms = (ttl && cJSON_IsNumber(ttl) && ttl->valuedouble > 0)
+                     ? (uint32_t)ttl->valuedouble : 0;
     } else if (strcmp(action->valuestring, "dismiss") == 0) {
         evt.type = BLE_EVT_NOTIF_DISMISS;
         cJSON *id = cJSON_GetObjectItem(json, "id");

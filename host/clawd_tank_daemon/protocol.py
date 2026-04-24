@@ -4,6 +4,12 @@ import json
 from pathlib import Path
 from typing import Optional
 
+# Per-notification auto-dismiss window. Sent as `ttl_ms` on the `add` action;
+# firmware counts down the progress bar and the daemon schedules a matching
+# dismiss. StopFailure (API-error) notifications are exempt — they persist
+# until the user or a subsequent hook dismisses them.
+NOTIFICATION_DEFAULT_TTL_MS = 120_000
+
 
 def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
     """Convert a Claude Code hook stdin payload to a daemon message.
@@ -131,6 +137,8 @@ def daemon_message_to_ble_payload(msg: dict) -> Optional[str]:
         }
         if msg.get("hook") == "StopFailure":
             payload["alert"] = "error"
+        else:
+            payload["ttl_ms"] = NOTIFICATION_DEFAULT_TTL_MS
         return json.dumps(payload)
 
     if event == "dismiss":

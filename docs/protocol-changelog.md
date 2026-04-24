@@ -47,6 +47,19 @@ Optional boolean field `sound_enabled`. When `false`, the firmware mutes on-devi
 
 Accepts JSON `true`/`false` or `0`/`1`. Boards without audio hardware (e.g. Waveshare C6) persist the value harmlessly — the gate is only meaningful on the fnk0104 S3 board. Unknown-field tolerance keeps older clients working. No GATT version bump.
 
+**`add` action field addition: `ttl_ms`** (additive, non-breaking)
+
+The `add` action now accepts an optional integer field `ttl_ms`. When present and > 0, the firmware records the add tick alongside `ttl_ms` and renders a depleting countdown strip at the bottom of that notification's card. When `(now − add_tick) ≥ ttl_ms`, the firmware auto-dismisses the slot locally. The daemon schedules a matching `asyncio.call_later` so its own `_active_notifications` cache drops the entry and broadcasts a `dismiss` to keep reconnect replay consistent.
+
+Omitted or `0` means "no auto-dismiss" — the previous behavior. The daemon omits `ttl_ms` for `StopFailure` (error) notifications so they persist until explicitly dismissed.
+
+```json
+{"action": "add", "id": "session-abc", "project": "my-project",
+ "message": "Waiting for input", "ttl_ms": 120000}
+```
+
+Firmware clients that ignore the field keep working unchanged. No GATT version bump.
+
 ## Version 1 (current)
 
 The original protocol. No version characteristic — the daemon infers v1 from its absence.

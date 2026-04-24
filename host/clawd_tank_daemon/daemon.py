@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
 from .ble_client import ClawdBleClient
-from .protocol import daemon_message_to_ble_payload, display_state_to_ble_payload, display_state_to_v1_payload
+from .protocol import (
+    NOTIFICATION_DEFAULT_TTL_MS,
+    daemon_message_to_ble_payload,
+    display_state_to_ble_payload,
+    display_state_to_v1_payload,
+)
 from .sim_client import SimClient, SIM_DEFAULT_PORT
 from .socket_server import SocketServer
 from .transport import TransportClient
@@ -141,6 +146,10 @@ class ClawdDaemon:
         self._sender_tasks: dict[str, asyncio.Task] = {}
         self._socket = SocketServer(on_message=self._handle_message)
         self._active_notifications: dict[str, dict] = {}
+        # Per-notification auto-dismiss timers keyed by session_id. Kept in
+        # sync with _active_notifications: every entry in this dict
+        # corresponds to exactly one entry in _active_notifications.
+        self._notification_ttl_handles: dict[str, asyncio.TimerHandle] = {}
         self._running = True
         self._shutdown_event = asyncio.Event()
         self._lock_fd: int | None = None
@@ -188,8 +197,16 @@ class ClawdDaemon:
 
         if event == "add":
             self._active_notifications[session_id] = msg
+            # Error notifications persist until an explicit dismiss — no TTL.
+            # Everything else auto-dismisses on the same window the firmware
+            # uses to drive its countdown bar (protocol.NOTIFICATION_DEFAULT_TTL_MS).
+            if hook != "StopFailure":
+                self._schedule_auto_dismiss(session_id, NOTIFICATION_DEFAULT_TTL_MS)
         elif event == "dismiss":
             self._active_notifications.pop(session_id, None)
+            # Any pending auto-dismiss is now redundant — cancel it so we
+            # don't double-fire and flood the transports with a second dismiss.
+            self._cancel_auto_dismiss(session_id)
 
         changed = self._update_session_state(event, hook, session_id, msg.get("agent_id", ""), msg.get("tool_name", ""))
 
@@ -239,6 +256,37 @@ class ClawdDaemon:
 
         if changed:
             self._persist_sessions()
+
+    def _schedule_auto_dismiss(self, session_id: str, ttl_ms: int) -> None:
+        """Arm a timer that auto-dismisses this notification after ttl_ms.
+        Replaces any existing timer for the same session_id (which matches
+        the firmware's behavior of resetting created_tick on a re-fired add).
+        """
+        if not session_id or ttl_ms <= 0:
+            return
+        self._cancel_auto_dismiss(session_id)
+        loop = asyncio.get_event_loop()
+        handle = loop.call_later(ttl_ms / 1000.0, self._fire_auto_dismiss, session_id)
+        self._notification_ttl_handles[session_id] = handle
+
+    def _cancel_auto_dismiss(self, session_id: str) -> None:
+        """Cancel the auto-dismiss timer for session_id, if any."""
+        handle = self._notification_ttl_handles.pop(session_id, None)
+        if handle is not None:
+            handle.cancel()
+
+    def _fire_auto_dismiss(self, session_id: str) -> None:
+        """Called by call_later when the TTL elapses. Drops the cached handle
+        and re-enters the message path with a synthetic dismiss so downstream
+        state (session store, observer, transport broadcast) stays consistent.
+        """
+        self._notification_ttl_handles.pop(session_id, None)
+        if session_id not in self._active_notifications:
+            # Already dismissed between scheduling and firing — no-op.
+            return
+        logger.info("Auto-dismiss: session=%s (TTL elapsed)", session_id[:12])
+        msg = {"event": "dismiss", "hook": "auto_dismiss", "session_id": session_id}
+        asyncio.create_task(self._handle_message(msg))
 
     def _compute_display_state(self) -> dict:
         """Derive the display state from all active session states."""
@@ -525,6 +573,12 @@ class ClawdDaemon:
         logger.info("Shutting down...")
         self._running = False
         self._shutdown_event.set()
+
+        # Cancel any pending auto-dismiss timers so they don't fire after
+        # the loop begins tearing down transports.
+        for handle in self._notification_ttl_handles.values():
+            handle.cancel()
+        self._notification_ttl_handles.clear()
 
         if hasattr(self, '_staleness_task'):
             self._staleness_task.cancel()

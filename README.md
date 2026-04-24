@@ -164,6 +164,7 @@ The daemon auto-starts on the first hook event. Logs at `~/.clawd-tank/daemon.lo
 - **Session persistence** — session state survives daemon restarts, so relaunching the app immediately shows the correct animation for running sessions
 - **Time display** — synced from host over BLE on connect (no WiFi/NTP needed)
 - **RGB LED flash** — onboard WS2812B cycles through colors on new notifications
+- **Per-notification auto-dismiss** — each card shows a depleting countdown strip and clears itself after 2 minutes. Error (API-failure) notifications stay until dismissed
 - **RLE sprite compression** — all sprite assets compressed ~14:1 (13MB raw → ~900KB)
 - **Bundled simulator** — macOS `.app` ships with the simulator binary, no hardware needed. Borderless resizable window with integer pixel scaling
 - **Multi-transport** — daemon supports BLE (hardware) and TCP (simulator) transports simultaneously, independently enable/disable

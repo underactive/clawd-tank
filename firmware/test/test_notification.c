@@ -262,6 +262,75 @@ static void test_count_consistency(void) {
     printf("  PASS: test_count_consistency\n");
 }
 
+// --- TTL auto-expire ---
+
+// ttl_ms == 0 means "no auto-dismiss" — slot must stay regardless of elapsed time.
+static void test_expire_zero_ttl_never_fires(void) {
+    notif_store_init(&store);
+    int rc = notif_store_add_with_ttl(&store, "s1", "p", "m", 1000, 0);
+    assert(rc == 0);
+    assert(notif_store_expire(&store, 1000) == 0);
+    assert(notif_store_expire(&store, 0xFFFFFFFFu) == 0);
+    assert(notif_store_count(&store) == 1);
+    printf("  PASS: test_expire_zero_ttl_never_fires\n");
+}
+
+// Non-zero ttl_ms: slot expires exactly when elapsed >= ttl_ms.
+static void test_expire_fires_when_elapsed_meets_ttl(void) {
+    notif_store_init(&store);
+    notif_store_add_with_ttl(&store, "s1", "p", "m", 1000, 500);
+    // At created + 499, not yet expired.
+    assert(notif_store_expire(&store, 1499) == 0);
+    assert(notif_store_count(&store) == 1);
+    // At created + 500, expired.
+    assert(notif_store_expire(&store, 1500) == 1);
+    assert(notif_store_count(&store) == 0);
+    // Second call finds nothing to dismiss.
+    assert(notif_store_expire(&store, 9999) == 0);
+    printf("  PASS: test_expire_fires_when_elapsed_meets_ttl\n");
+}
+
+// A store with a mix of TTL-bearing and TTL-less slots expires only the eligible ones.
+static void test_expire_mix_of_slots(void) {
+    notif_store_init(&store);
+    notif_store_add_with_ttl(&store, "sticky",  "p", "m", 1000, 0);     // no TTL
+    notif_store_add_with_ttl(&store, "young",   "p", "m", 1000, 1000);  // expires at 2000
+    notif_store_add_with_ttl(&store, "old",     "p", "m", 500,  200);   // expires at 700
+    notif_store_add(&store, "legacy", "p", "m");                         // created_tick=0, ttl_ms=0
+    assert(notif_store_count(&store) == 4);
+
+    // At t=1000: only "old" (700) has passed. "young" (2000) not yet.
+    int dismissed = notif_store_expire(&store, 1000);
+    assert(dismissed == 1);
+    assert(notif_store_count(&store) == 3);
+
+    // At t=3000: "young" (2000) now eligible.
+    dismissed = notif_store_expire(&store, 3000);
+    assert(dismissed == 1);
+    assert(notif_store_count(&store) == 2);
+
+    // "sticky" and "legacy" (both ttl=0) remain forever.
+    assert(notif_store_expire(&store, 0xFFFFFFFFu) == 0);
+    assert(notif_store_count(&store) == 2);
+
+    printf("  PASS: test_expire_mix_of_slots\n");
+}
+
+// Re-firing an add for an existing ID resets created_tick; the previously
+// pending expiry no longer fires at the original time.
+static void test_readd_resets_countdown(void) {
+    notif_store_init(&store);
+    notif_store_add_with_ttl(&store, "s1", "p", "first",  1000, 500);
+    // Without re-add, this would expire at t=1500.
+    notif_store_add_with_ttl(&store, "s1", "p", "second", 1400, 500);
+    // At t=1500 (would have been expiry under the old timer), not yet.
+    assert(notif_store_expire(&store, 1500) == 0);
+    // At t=1900 (= 1400 + 500), expired on the new timer.
+    assert(notif_store_expire(&store, 1900) == 1);
+    assert(notif_store_count(&store) == 0);
+    printf("  PASS: test_readd_resets_countdown\n");
+}
+
 int main(void) {
     printf("Running notification store tests...\n");
     test_init_empty();
@@ -275,6 +344,10 @@ int main(void) {
     test_max_length_strings();
     test_empty_string_id();
     test_count_consistency();
+    test_expire_zero_ttl_never_fires();
+    test_expire_fires_when_elapsed_meets_ttl();
+    test_expire_mix_of_slots();
+    test_readd_resets_countdown();
     printf("All tests passed!\n");
     return 0;
 }

@@ -145,7 +145,7 @@ void sim_events_init_inline(const char *events_str)
         }
         else if (strncmp(p, "notify", 6) == 0) {
             p += 6;
-            ble_evt_t evt = { .type = BLE_EVT_NOTIF_ADD };
+            ble_evt_t evt = { .type = BLE_EVT_NOTIF_ADD, .ttl_ms = NOTIF_DEFAULT_TTL_MS };
             /* Generate a unique ID */
             snprintf(evt.id, sizeof(evt.id), "sim_%d", s_next_id);
             /* Track ID for dismiss-by-index */
@@ -311,7 +311,7 @@ void sim_events_init_scenario(const char *path)
             add_event(time_ms, &evt, "clear");
         }
         else if (strcmp(event_name, "notify") == 0) {
-            ble_evt_t evt = { .type = BLE_EVT_NOTIF_ADD };
+            ble_evt_t evt = { .type = BLE_EVT_NOTIF_ADD, .ttl_ms = NOTIF_DEFAULT_TTL_MS };
             snprintf(evt.id, sizeof(evt.id), "scn_%d", s_next_id);
             if (s_notif_id_count < MAX_NOTIF_IDS) {
                 strncpy(s_notif_ids[s_notif_id_count], evt.id, NOTIF_MAX_ID_LEN - 1);
